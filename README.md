@@ -47,6 +47,8 @@
 
 如果自动创建数据库时出现 `ERROR 1045 (28000): Access denied`，表示填写的 MySQL/MariaDB 管理员账号或密码不正确，或该账号没有建库/授权权限。此时可以复制脚本输出的 SQL 到 phpMyAdmin 执行，手动建好数据库和用户后继续安装。
 
+如果自动创建数据库时出现 `ERROR 2002 (HY000): Can't connect to local server through socket`，表示服务器没有本机 socket 方式可用的 MySQL/MariaDB 服务。aaPanel 常见做法是先在 aaPanel 的“数据库”页面创建数据库和用户，再运行安装脚本，并在“是否尝试自动创建数据库和用户？”处选择 `n`。
+
 ### 数据库权限要求
 
 面板连接数据库的用户需要拥有目标数据库的完整权限：
@@ -134,12 +136,18 @@ panel_settings
 ## aaPanel 部署
 
 1. 在 aaPanel 中安装 MySQL/MariaDB 和 phpMyAdmin。
-2. 运行 `install.sh`，按中文提示填写数据库信息，监听地址建议保持 `127.0.0.1`。
-3. 在 aaPanel 网站中新建站点，例如 `linode.example.com`。
-4. 打开站点设置，配置反向代理：
+2. 在 aaPanel 的“数据库”页面创建数据库和用户，例如：
+   - 数据库名：`linode_panel`
+   - 用户名：`linode_panel`
+   - 密码：自行生成强密码
+3. 运行 `install.sh`，按中文提示填写数据库信息，监听地址建议保持 `127.0.0.1`。
+4. 到“是否尝试自动创建数据库和用户？”时，如果数据库已在 aaPanel 创建，选择 `n`。
+5. 安装脚本会验证数据库账号能否连接，验证通过后才会继续编译和启动服务。
+6. 在 aaPanel 网站中新建站点，例如 `linode.example.com`。
+7. 打开站点设置，配置反向代理：
    - 目标 URL：`http://127.0.0.1:8088`
    - 发送域名：`$host`
-5. 在 SSL 菜单申请证书并强制 HTTPS。
+8. 在 SSL 菜单申请证书并强制 HTTPS。
 
 ## AcePanel 部署
 

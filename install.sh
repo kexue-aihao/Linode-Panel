@@ -103,6 +103,40 @@ continue_after_manual_database() {
   exit 1
 }
 
+test_database_connection() {
+  echo "正在验证面板数据库账号是否可连接。"
+  if ! have mysql; then
+    echo "未检测到 mysql 命令，无法在安装阶段验证数据库连接，将在服务启动时验证。"
+    return 0
+  fi
+
+  MYSQL_PWD="$DB_PASSWORD"
+  export MYSQL_PWD
+  if mysql --protocol=TCP -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" "$DB_NAME" -e "SELECT 1;" >/dev/null 2>&1; then
+    unset MYSQL_PWD 2>/dev/null || true
+    echo "数据库连接验证通过。"
+    return 0
+  fi
+  unset MYSQL_PWD 2>/dev/null || true
+
+  echo "数据库连接验证失败，安装已停止。"
+  echo
+  echo "请确认 MySQL/MariaDB 已启动，并且下面数据库、用户和密码已经真实创建："
+  echo "  主机：$DB_HOST"
+  echo "  端口：$DB_PORT"
+  echo "  数据库：$DB_NAME"
+  echo "  用户：$DB_USER"
+  echo "  密码：$DB_PASSWORD"
+  echo
+  echo "可在 phpMyAdmin 或 aaPanel 数据库管理的 SQL 页面执行："
+  echo "-------------------- SQL 开始 --------------------"
+  print_manual_db_sql
+  echo "-------------------- SQL 结束 --------------------"
+  echo
+  echo "如果 aaPanel 使用了非 3306 端口，请重新运行脚本并填写正确端口。"
+  exit 1
+}
+
 ask_yes_no() {
   prompt="$1"
   default="$2"
@@ -330,6 +364,7 @@ install_packages
 ensure_go
 collect_config
 maybe_create_database
+test_database_connection
 sync_source
 build_binary
 install_service
