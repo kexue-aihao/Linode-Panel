@@ -1,0 +1,7 @@
+.gocache/
+.local-data/
+bin/
+data/
+mysql-data/
+*.exe
+*.log
