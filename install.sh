@@ -163,7 +163,7 @@ maybe_create_database() {
 
   if ask_yes_no "是否尝试自动创建数据库和用户？需要 MySQL root 权限" "n"; then
     MYSQL_ROOT_USER="$(ask "MySQL 管理员账号" "root")"
-    MYSQL_ROOT_PASSWORD="$(ask_secret "MySQL 管理员密码，留空表示无密码或使用 socket 登录" "")"
+    MYSQL_ROOT_PASSWORD="$(ask_secret "MySQL 管理员密码，留空表示本机 socket 登录" "")"
     if [ -n "$MYSQL_ROOT_PASSWORD" ]; then
       MYSQL_PWD="$MYSQL_ROOT_PASSWORD"
       export MYSQL_PWD
@@ -171,7 +171,8 @@ maybe_create_database() {
       unset MYSQL_PWD 2>/dev/null || true
     fi
     SQL_DB_PASSWORD="$(quote_sql "$DB_PASSWORD")"
-    mysql --protocol=TCP -h "$DB_HOST" -P "$DB_PORT" -u "$MYSQL_ROOT_USER" <<EOF_SQL
+    SQL_FILE="/tmp/linode-panel-init-db.$$.sql"
+    cat > "$SQL_FILE" <<EOF_SQL
 CREATE DATABASE IF NOT EXISTS \`$DB_NAME\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER IF NOT EXISTS '$DB_USER'@'%' IDENTIFIED BY $SQL_DB_PASSWORD;
 CREATE USER IF NOT EXISTS '$DB_USER'@'localhost' IDENTIFIED BY $SQL_DB_PASSWORD;
@@ -179,6 +180,24 @@ GRANT ALL PRIVILEGES ON \`$DB_NAME\`.* TO '$DB_USER'@'%';
 GRANT ALL PRIVILEGES ON \`$DB_NAME\`.* TO '$DB_USER'@'localhost';
 FLUSH PRIVILEGES;
 EOF_SQL
+    if [ -z "$MYSQL_ROOT_PASSWORD" ] && { [ "$DB_HOST" = "127.0.0.1" ] || [ "$DB_HOST" = "localhost" ]; }; then
+      echo "检测到本机数据库且管理员密码留空，将尝试使用 MySQL/MariaDB socket 登录。"
+      if ! mysql -u "$MYSQL_ROOT_USER" < "$SQL_FILE"; then
+        rm -f "$SQL_FILE"
+        echo "自动建库失败：无法使用 $MYSQL_ROOT_USER 通过 socket 登录 MySQL/MariaDB。"
+        echo "处理方法：使用真实的 MySQL 管理员账号和密码，或先在 phpMyAdmin/服务器面板中手动创建数据库和用户，再重新运行脚本并选择不自动创建。"
+        exit 1
+      fi
+    else
+      if ! mysql --protocol=TCP -h "$DB_HOST" -P "$DB_PORT" -u "$MYSQL_ROOT_USER" < "$SQL_FILE"; then
+        rm -f "$SQL_FILE"
+        echo "自动建库失败：MySQL/MariaDB 管理员账号或密码不正确，或该账号没有创建数据库/用户的权限。"
+        echo "当前尝试登录账号：$MYSQL_ROOT_USER@$DB_HOST"
+        echo "处理方法：使用 root/数据库管理员账号，或先在 phpMyAdmin/服务器面板中手动创建数据库和用户，再重新运行脚本并选择不自动创建。"
+        exit 1
+      fi
+    fi
+    rm -f "$SQL_FILE"
     echo "数据库和用户已创建或已存在。"
   else
     echo "已选择手动建库。请确认数据库 $DB_NAME 和用户 $DB_USER 已存在并有完整权限。"
