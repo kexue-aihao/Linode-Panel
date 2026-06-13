@@ -71,6 +71,38 @@ quote_sql() {
   printf "%s" "$1" | sed "s/'/''/g; 1s/^/'/; \$s/\$/'/"
 }
 
+print_manual_db_sql() {
+  sql_db_password="$(quote_sql "$DB_PASSWORD")"
+  cat <<EOF_SQL
+CREATE DATABASE IF NOT EXISTS \`$DB_NAME\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS '$DB_USER'@'%' IDENTIFIED BY $sql_db_password;
+CREATE USER IF NOT EXISTS '$DB_USER'@'localhost' IDENTIFIED BY $sql_db_password;
+GRANT ALL PRIVILEGES ON \`$DB_NAME\`.* TO '$DB_USER'@'%';
+GRANT ALL PRIVILEGES ON \`$DB_NAME\`.* TO '$DB_USER'@'localhost';
+FLUSH PRIVILEGES;
+EOF_SQL
+}
+
+continue_after_manual_database() {
+  echo
+  echo "你可以在 phpMyAdmin 或数据库面板的 SQL 页面执行下面语句来手动建库："
+  echo "-------------------- SQL 开始 --------------------"
+  print_manual_db_sql
+  echo "-------------------- SQL 结束 --------------------"
+  echo
+  echo "数据库连接信息会写入 $ENV_DIR/linode-panel.env："
+  echo "  数据库：$DB_NAME"
+  echo "  用户：$DB_USER"
+  echo "  密码：$DB_PASSWORD"
+  echo
+  if ask_yes_no "如果你已经手动创建好数据库和用户，是否继续安装？" "n"; then
+    echo "将跳过自动建库并继续安装。"
+    return 0
+  fi
+  echo "已停止安装。请完成手动建库后重新运行脚本，并在自动创建数据库这一步选择 n。"
+  exit 1
+}
+
 ask_yes_no() {
   prompt="$1"
   default="$2"
@@ -162,6 +194,7 @@ maybe_create_database() {
   fi
 
   if ask_yes_no "是否尝试自动创建数据库和用户？需要 MySQL root 权限" "n"; then
+    echo "提示：这里需要 MySQL/MariaDB 管理员账号，通常是 root，不是面板要使用的普通数据库用户。"
     MYSQL_ROOT_USER="$(ask "MySQL 管理员账号" "root")"
     MYSQL_ROOT_PASSWORD="$(ask_secret "MySQL 管理员密码，留空表示本机 socket 登录" "")"
     if [ -n "$MYSQL_ROOT_PASSWORD" ]; then
@@ -170,23 +203,15 @@ maybe_create_database() {
     else
       unset MYSQL_PWD 2>/dev/null || true
     fi
-    SQL_DB_PASSWORD="$(quote_sql "$DB_PASSWORD")"
     SQL_FILE="/tmp/linode-panel-init-db.$$.sql"
-    cat > "$SQL_FILE" <<EOF_SQL
-CREATE DATABASE IF NOT EXISTS \`$DB_NAME\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER IF NOT EXISTS '$DB_USER'@'%' IDENTIFIED BY $SQL_DB_PASSWORD;
-CREATE USER IF NOT EXISTS '$DB_USER'@'localhost' IDENTIFIED BY $SQL_DB_PASSWORD;
-GRANT ALL PRIVILEGES ON \`$DB_NAME\`.* TO '$DB_USER'@'%';
-GRANT ALL PRIVILEGES ON \`$DB_NAME\`.* TO '$DB_USER'@'localhost';
-FLUSH PRIVILEGES;
-EOF_SQL
+    print_manual_db_sql > "$SQL_FILE"
     if [ -z "$MYSQL_ROOT_PASSWORD" ] && { [ "$DB_HOST" = "127.0.0.1" ] || [ "$DB_HOST" = "localhost" ]; }; then
       echo "检测到本机数据库且管理员密码留空，将尝试使用 MySQL/MariaDB socket 登录。"
       if ! mysql -u "$MYSQL_ROOT_USER" < "$SQL_FILE"; then
         rm -f "$SQL_FILE"
         echo "自动建库失败：无法使用 $MYSQL_ROOT_USER 通过 socket 登录 MySQL/MariaDB。"
         echo "处理方法：使用真实的 MySQL 管理员账号和密码，或先在 phpMyAdmin/服务器面板中手动创建数据库和用户，再重新运行脚本并选择不自动创建。"
-        exit 1
+        continue_after_manual_database
       fi
     else
       if ! mysql --protocol=TCP -h "$DB_HOST" -P "$DB_PORT" -u "$MYSQL_ROOT_USER" < "$SQL_FILE"; then
@@ -194,7 +219,7 @@ EOF_SQL
         echo "自动建库失败：MySQL/MariaDB 管理员账号或密码不正确，或该账号没有创建数据库/用户的权限。"
         echo "当前尝试登录账号：$MYSQL_ROOT_USER@$DB_HOST"
         echo "处理方法：使用 root/数据库管理员账号，或先在 phpMyAdmin/服务器面板中手动创建数据库和用户，再重新运行脚本并选择不自动创建。"
-        exit 1
+        continue_after_manual_database
       fi
     fi
     rm -f "$SQL_FILE"
