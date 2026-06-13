@@ -27,6 +27,45 @@
 
 这个架构适合面板部署：性能足够、数据库可视化管理方便、升级简单，迁移时备份数据库即可。
 
+## 部署环境依赖
+
+### 主机安装依赖
+
+适用于直接运行 `install.sh` 的方式：
+
+- 操作系统：推荐 Debian 11+、Ubuntu 20.04+、CentOS 8+、Rocky Linux 8+、AlmaLinux 8+。
+- 系统权限：需要 `root` 或可使用 `sudo` 的用户。
+- 服务管理：需要 `systemd`，用于注册和守护 `linode-panel` 服务。
+- 基础命令：`git`、`curl`、`tar`、`ca-certificates`、`openssl`。
+- 编译环境：Go `1.24.0` 或更高版本。脚本未检测到 Go 时会自动下载 Go `1.24.0`。
+- 数据库：MySQL 8+ 或 MariaDB 10.6+。
+- 数据库管理：phpMyAdmin，可由 aaPanel、AcePanel、1Panel 或系统包管理器安装。
+- 反向代理：Nginx、OpenResty、Apache 或面板自带反向代理功能。
+- 网络访问：服务器需要能访问 Git 仓库、Go 下载站点、Go 模块代理和 Linode API。
+
+`install.sh` 会尝试自动安装基础命令，并可在本机存在 `mysql` 命令时交互式创建数据库和用户。MySQL/MariaDB 服务本身、phpMyAdmin、域名解析和 HTTPS 证书建议在服务器面板中提前准备。
+
+### 数据库权限要求
+
+面板连接数据库的用户需要拥有目标数据库的完整权限：
+
+```sql
+CREATE, ALTER, SELECT, INSERT, UPDATE, DELETE, INDEX
+```
+
+首次启动时，面板会自动创建 `panel_settings` 表。使用 phpMyAdmin 手动创建数据库时，建议字符集选择 `utf8mb4`，排序规则选择 `utf8mb4_unicode_ci`。
+
+### Docker Compose 依赖
+
+适用于 1Panel 编排、AcePanel Docker 编排或手动 `docker compose up -d`：
+
+- Docker Engine 24+。
+- Docker Compose v2。
+- 服务器需要能拉取 `mariadb:11`、`phpmyadmin:5`、`golang:1.24-alpine`、`alpine:3.20` 镜像。
+- 至少保留一个持久化目录用于 `./mysql-data`。
+
+Compose 模式会同时启动 `linode-panel`、`mariadb` 和 `phpmyadmin`，不需要在宿主机额外安装 Go 或 MySQL。
+
 ## 一键部署
 
 在服务器上运行：
