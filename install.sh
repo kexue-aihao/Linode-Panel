@@ -275,6 +275,28 @@ EOF_ENV
   systemctl restart linode-panel
 }
 
+check_service_health() {
+  echo "正在检查面板服务健康状态。"
+  sleep 2
+  if curl -fsS "http://127.0.0.1:$PORT/api/health" >/dev/null 2>&1; then
+    echo "面板服务已正常启动。"
+    return 0
+  fi
+
+  echo "警告：面板服务未通过健康检查，反向代理访问可能显示 Bad Gateway。"
+  echo
+  echo "请在服务器上执行以下命令查看原因："
+  echo "  systemctl status linode-panel --no-pager"
+  echo "  journalctl -u linode-panel -n 80 --no-pager"
+  echo "  curl -v http://127.0.0.1:$PORT/api/health"
+  echo
+  echo "常见原因："
+  echo "  1. MySQL/MariaDB 数据库名、用户名或密码填写错误。"
+  echo "  2. 数据库用户没有 panel_settings 表的创建或读写权限。"
+  echo "  3. 反向代理目标不是 http://127.0.0.1:$PORT。"
+  echo "  4. 端口 $PORT 被其他程序占用。"
+}
+
 print_panel_notes() {
   IP="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
   [ -n "$IP" ] || IP="服务器IP"
@@ -311,4 +333,5 @@ maybe_create_database
 sync_source
 build_binary
 install_service
+check_service_health
 print_panel_notes

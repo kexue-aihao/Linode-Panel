@@ -213,6 +213,31 @@ LINODE_PANEL_DB_USER=linode_panel
 LINODE_PANEL_DB_PASSWORD=change-this-password
 ```
 
+## Bad Gateway 排错
+
+通过 aaPanel、AcePanel、1Panel 或 Nginx 访问时出现 `Bad Gateway`，通常表示反向代理连不到后端 `linode-panel` 服务。按下面顺序检查：
+
+```sh
+systemctl status linode-panel --no-pager
+journalctl -u linode-panel -n 80 --no-pager
+curl -v http://127.0.0.1:8088/api/health
+ss -lntp | grep 8088
+```
+
+常见原因：
+
+- `linode-panel` 没有启动，或启动后因为数据库连接失败退出。
+- `/etc/linode-panel/linode-panel.env` 中的数据库名、用户名或密码不正确。
+- 数据库用户没有创建或读写 `panel_settings` 表的权限。
+- 反向代理目标写错，应该是 `http://127.0.0.1:8088`。
+- 面板监听端口被其他程序占用。
+
+如果是数据库配置问题，修正 `/etc/linode-panel/linode-panel.env` 后执行：
+
+```sh
+systemctl restart linode-panel
+```
+
 ## 安全建议
 
 - Linode Token 只保存在服务端数据库中，不会返回前端。
