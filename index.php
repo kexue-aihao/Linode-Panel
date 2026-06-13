@@ -1,10 +1,13 @@
+<?php
+declare(strict_types=1);
+?>
 <!doctype html>
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Linode Panel</title>
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="assets/styles.css" />
   </head>
   <body>
     <div id="app">
@@ -17,26 +20,11 @@
           </div>
         </div>
         <nav>
-          <button class="nav-item active" data-view="instances">
-            <span class="icon">□</span>
-            实例
-          </button>
-          <button class="nav-item" data-view="create">
-            <span class="icon">＋</span>
-            创建
-          </button>
-          <button class="nav-item" data-view="firewalls">
-            <span class="icon">◇</span>
-            防火墙
-          </button>
-          <button class="nav-item" data-view="events">
-            <span class="icon">◷</span>
-            事件
-          </button>
-          <button class="nav-item" data-view="settings">
-            <span class="icon">⚙</span>
-            设置
-          </button>
+          <button class="nav-item active" data-view="instances"><span class="icon">□</span>实例</button>
+          <button class="nav-item" data-view="create"><span class="icon">＋</span>创建</button>
+          <button class="nav-item" data-view="firewalls"><span class="icon">◇</span>防火墙</button>
+          <button class="nav-item" data-view="events"><span class="icon">◷</span>事件</button>
+          <button class="nav-item" data-view="settings"><span class="icon">⚙</span>设置</button>
         </nav>
         <div class="sidebar-foot">
           <div id="tokenState" class="status-dot muted">未连接</div>
@@ -63,18 +51,9 @@
             <h2 id="authTitle">初始化面板</h2>
             <p id="authHint">创建本面板的管理员账号，并保存 Linode Token。</p>
             <form id="authForm" class="form-grid">
-              <label>
-                管理员
-                <input id="authUser" autocomplete="username" placeholder="admin" />
-              </label>
-              <label>
-                密码
-                <input id="authPassword" type="password" autocomplete="current-password" placeholder="至少 10 位" />
-              </label>
-              <label id="authTokenWrap">
-                Linode Token
-                <input id="authToken" type="password" autocomplete="off" placeholder="Personal Access Token" />
-              </label>
+              <label>管理员<input id="authUser" autocomplete="username" placeholder="admin" /></label>
+              <label>密码<input id="authPassword" type="password" autocomplete="current-password" placeholder="至少 10 位" /></label>
+              <label id="authTokenWrap">Linode Token<input id="authToken" type="password" autocomplete="off" placeholder="Personal Access Token" /></label>
               <button class="primary wide" type="submit">继续</button>
             </form>
           </div>
@@ -92,40 +71,14 @@
                 <button type="button" id="loadCatalogBtn" class="secondary small">载入选项</button>
               </div>
               <div class="form-grid two">
-                <label>
-                  实例名称
-                  <input name="label" placeholder="web-1" required />
-                </label>
-                <label>
-                  区域
-                  <select name="region" required></select>
-                </label>
-                <label>
-                  套餐
-                  <select name="type" required></select>
-                </label>
-                <label>
-                  镜像
-                  <select name="image" required></select>
-                </label>
-                <label>
-                  Root 密码
-                  <input name="root_pass" type="password" autocomplete="new-password" placeholder="强密码" />
-                </label>
-                <label>
-                  SSH 公钥
-                  <textarea name="authorized_keys" rows="3" placeholder="ssh-ed25519 AAAA..."></textarea>
-                </label>
-                <label>
-                  防火墙
-                  <select name="firewall_id">
-                    <option value="">不绑定</option>
-                  </select>
-                </label>
-                <label>
-                  标签
-                  <input name="tags" placeholder="panel,production" />
-                </label>
+                <label>实例名称<input name="label" placeholder="web-1" required /></label>
+                <label>区域<select name="region" required></select></label>
+                <label>套餐<select name="type" required></select></label>
+                <label>镜像<select name="image" required></select></label>
+                <label>Root 密码<input name="root_pass" type="password" autocomplete="new-password" placeholder="强密码" /></label>
+                <label>SSH 公钥<textarea name="authorized_keys" rows="3" placeholder="ssh-ed25519 AAAA..."></textarea></label>
+                <label>防火墙<select name="firewall_id"><option value="">不绑定</option></select></label>
+                <label>标签<input name="tags" placeholder="panel,production" /></label>
               </div>
               <div class="toggle-row">
                 <label><input type="checkbox" name="backups_enabled" /> 启用备份</label>
@@ -166,22 +119,10 @@
             <div class="panel">
               <h2>设置</h2>
               <div class="form-grid two">
-                <label>
-                  管理员
-                  <input name="admin_user" />
-                </label>
-                <label>
-                  新密码
-                  <input name="password" type="password" autocomplete="new-password" placeholder="留空则不修改" />
-                </label>
-                <label>
-                  Linode Token
-                  <input name="linode_token" type="password" autocomplete="off" placeholder="留空则不修改" />
-                </label>
-                <label>
-                  代理 URL
-                  <input name="proxy_url" placeholder="http://127.0.0.1:7890" />
-                </label>
+                <label>管理员<input name="admin_user" /></label>
+                <label>新密码<input name="password" type="password" autocomplete="new-password" placeholder="留空则不修改" /></label>
+                <label>Linode Token<input name="linode_token" type="password" autocomplete="off" placeholder="留空则不修改" /></label>
+                <label>代理 URL<input name="proxy_url" placeholder="http://127.0.0.1:7890" /></label>
               </div>
               <div class="toggle-row">
                 <label><input type="checkbox" name="clear_linode_token" /> 清空 Token</label>
@@ -194,7 +135,7 @@
       </main>
     </div>
 
-    <script src="/app.js"></script>
+    <script src="assets/app.js"></script>
   </body>
 </html>
 

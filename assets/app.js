@@ -1,14 +1,7 @@
-const state = {
-  configured: false,
-  authenticated: false,
-  settings: {},
-  view: "instances",
-  catalog: null,
-};
-
+const state = { configured: false, authenticated: false, settings: {}, view: "instances", catalog: null };
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-
+const apiPath = (action) => `api.php?action=${encodeURIComponent(action)}`;
 const titles = {
   instances: ["实例", "查看状态、IP、套餐和生命周期操作。"],
   create: ["创建", "选择区域、套餐、镜像并启动新实例。"],
@@ -17,8 +10,8 @@ const titles = {
   settings: ["设置", "管理面板账号、Linode Token 和代理。"],
 };
 
-async function api(path, options = {}) {
-  const res = await fetch(path, {
+async function api(action, options = {}) {
+  const res = await fetch(apiPath(action), {
     credentials: "same-origin",
     headers: { "Content-Type": "application/json", ...(options.headers || {}) },
     ...options,
@@ -41,10 +34,6 @@ function showNotice(message, type = "") {
   showNotice.timer = setTimeout(() => node.classList.add("hidden"), 5200);
 }
 
-function requireConfirm(message) {
-  return window.confirm(message);
-}
-
 async function init() {
   bindNavigation();
   bindForms();
@@ -53,14 +42,12 @@ async function init() {
 
 async function loadSession() {
   try {
-    const session = await api("/api/session");
+    const session = await api("session");
     state.configured = session.configured;
     state.authenticated = session.authenticated;
     state.settings = session.settings || {};
     renderShell();
-    if (state.authenticated) {
-      await loadInstances();
-    }
+    if (state.authenticated) await loadInstances();
   } catch (err) {
     showNotice(err.message, "error");
   }
@@ -72,7 +59,6 @@ function renderShell() {
   $$(".view").forEach((view) => view.classList.toggle("hidden", locked));
   $(".topbar").classList.toggle("hidden", locked);
   $(".sidebar").classList.toggle("hidden", locked);
-
   if (locked) {
     $("#authTitle").textContent = state.configured ? "登录面板" : "初始化面板";
     $("#authHint").textContent = state.configured ? "输入管理员账号继续管理 Linode。" : "创建本面板的管理员账号，并保存 Linode Token。";
@@ -80,7 +66,6 @@ function renderShell() {
     $("#authUser").value = state.settings.admin_user || "admin";
     return;
   }
-
   $("#tokenState").textContent = state.settings.has_linode_token ? "Token 已保存" : "未连接";
   $("#tokenState").classList.toggle("muted", !state.settings.has_linode_token);
   const settingsForm = $("#settingsForm");
@@ -90,12 +75,8 @@ function renderShell() {
 }
 
 function bindNavigation() {
-  $$(".nav-item").forEach((button) => {
-    button.addEventListener("click", () => setView(button.dataset.view));
-  });
-  $$("[data-jump]").forEach((button) => {
-    button.addEventListener("click", () => setView(button.dataset.jump));
-  });
+  $$(".nav-item").forEach((button) => button.addEventListener("click", () => setView(button.dataset.view)));
+  $$("[data-jump]").forEach((button) => button.addEventListener("click", () => setView(button.dataset.jump)));
   $("#refreshBtn").addEventListener("click", () => refreshCurrent());
   $("#logoutBtn").addEventListener("click", logout);
   $("#loadCatalogBtn").addEventListener("click", () => loadCatalog(true));
@@ -106,14 +87,9 @@ function bindNavigation() {
 function bindForms() {
   $("#authForm").addEventListener("submit", async (event) => {
     event.preventDefault();
-    const payload = {
-      admin_user: $("#authUser").value.trim() || "admin",
-      password: $("#authPassword").value,
-    };
-    const endpoint = state.configured ? "/api/login" : "/api/setup";
-    if (!state.configured) {
-      payload.linode_token = $("#authToken").value.trim();
-    }
+    const payload = { admin_user: $("#authUser").value.trim() || "admin", password: $("#authPassword").value };
+    const endpoint = state.configured ? "login" : "setup";
+    if (!state.configured) payload.linode_token = $("#authToken").value.trim();
     try {
       const settings = await api(endpoint, { method: "POST", body: JSON.stringify(payload) });
       state.configured = true;
@@ -144,7 +120,7 @@ function bindForms() {
     if (!payload.linode_token) delete payload.linode_token;
     if (!payload.proxy_url) delete payload.proxy_url;
     try {
-      state.settings = await api("/api/settings", { method: "PUT", body: JSON.stringify(payload) });
+      state.settings = await api("settings", { method: "PUT", body: JSON.stringify(payload) });
       form.password.value = "";
       form.linode_token.value = "";
       form.clear_linode_token.checked = false;
@@ -158,13 +134,10 @@ function bindForms() {
 
   $("#createForm").addEventListener("submit", async (event) => {
     event.preventDefault();
-    if (!requireConfirm("确认创建 Linode 实例？该操作会产生费用。")) return;
+    if (!window.confirm("确认创建 Linode 实例？该操作会产生费用。")) return;
     const form = event.currentTarget;
     const rootPass = form.root_pass.value;
-    const keys = form.authorized_keys.value
-      .split(/\n+/)
-      .map((item) => item.trim())
-      .filter(Boolean);
+    const keys = form.authorized_keys.value.split(/\n+/).map((item) => item.trim()).filter(Boolean);
     if (!rootPass && keys.length === 0) {
       showNotice("请填写 Root 密码或至少一个 SSH 公钥", "error");
       return;
@@ -183,7 +156,7 @@ function bindForms() {
     const tags = form.tags.value.split(",").map((item) => item.trim()).filter(Boolean);
     if (tags.length) payload.tags = tags;
     try {
-      const instance = await api("/api/linode/instances", { method: "POST", body: JSON.stringify(payload) });
+      const instance = await api("linode/instances", { method: "POST", body: JSON.stringify(payload) });
       showNotice(`实例 ${instance.label || payload.label} 已提交创建`, "success");
       form.root_pass.value = "";
       setView("instances");
@@ -217,16 +190,14 @@ async function refreshCurrent() {
 async function loadInstances() {
   try {
     $("#instanceGrid").innerHTML = `<div class="panel">加载实例中...</div>`;
-    const data = await api("/api/linode/instances");
+    const data = await api("linode/instances");
     const instances = data.data || [];
     if (!instances.length) {
       $("#instanceGrid").innerHTML = `<div class="panel">还没有实例。</div>`;
       return;
     }
     $("#instanceGrid").innerHTML = instances.map(instanceCard).join("");
-    $$(".instance-card [data-action]").forEach((button) => {
-      button.addEventListener("click", () => instanceAction(button.dataset.id, button.dataset.action, button.dataset.label));
-    });
+    $$(".instance-card [data-action]").forEach((button) => button.addEventListener("click", () => instanceAction(button.dataset.id, button.dataset.action, button.dataset.label)));
   } catch (err) {
     $("#instanceGrid").innerHTML = `<div class="panel">${escapeHTML(err.message)}</div>`;
   }
@@ -239,10 +210,7 @@ function instanceCard(item) {
   return `
     <article class="instance-card">
       <div class="card-top">
-        <div>
-          <h3>${escapeHTML(item.label || `linode-${item.id}`)}</h3>
-          <p class="muted">#${item.id}</p>
-        </div>
+        <div><h3>${escapeHTML(item.label || `linode-${item.id}`)}</h3><p class="muted">#${item.id}</p></div>
         <span class="badge ${statusClass}">${escapeHTML(item.status || "unknown")}</span>
       </div>
       <div class="meta-grid">
@@ -257,19 +225,17 @@ function instanceCard(item) {
         <button class="secondary small" data-action="shutdown" data-id="${item.id}" data-label="${escapeHTML(item.label || "")}">关机</button>
         <button class="danger small" data-action="delete" data-id="${item.id}" data-label="${escapeHTML(item.label || "")}">删除</button>
       </div>
-    </article>
-  `;
+    </article>`;
 }
 
 async function instanceAction(id, action, label) {
   const names = { boot: "开机", reboot: "重启", shutdown: "关机", delete: "删除" };
-  const risky = action === "delete";
-  if (!requireConfirm(`确认${names[action] || action}实例 ${label || id}？${risky ? " 删除后不可恢复。" : ""}`)) return;
+  if (!window.confirm(`确认${names[action] || action}实例 ${label || id}？${action === "delete" ? " 删除后不可恢复。" : ""}`)) return;
   try {
     if (action === "delete") {
-      await api(`/api/linode/instances/${id}`, { method: "DELETE" });
+      await api(`linode/instances/${id}`, { method: "DELETE" });
     } else {
-      await api(`/api/linode/instances/${id}/${action}`, { method: "POST", body: "{}" });
+      await api(`linode/instances/${id}/${action}`, { method: "POST", body: "{}" });
     }
     showNotice(`已提交${names[action] || action}操作`, "success");
     await loadInstances();
@@ -281,8 +247,7 @@ async function instanceAction(id, action, label) {
 async function loadCatalog(force = false) {
   if (state.catalog && !force) return populateCatalog();
   try {
-    const catalog = await api("/api/linode/catalog");
-    state.catalog = catalog;
+    state.catalog = await api("linode/catalog");
     populateCatalog();
     showNotice("选项已载入", "success");
   } catch (err) {
@@ -292,14 +257,10 @@ async function loadCatalog(force = false) {
 
 function populateCatalog() {
   if (!state.catalog) return;
-  const regions = state.catalog.regions?.data || [];
-  const types = state.catalog.types?.data || [];
-  const images = state.catalog.images?.data || [];
-  const firewalls = state.catalog.firewalls?.data || [];
-  fillSelect($("#createForm").region, regions, (item) => item.id, (item) => `${item.label || item.id} (${item.id})`);
-  fillSelect($("#createForm").type, types, (item) => item.id, (item) => `${item.label || item.id} - $${item.price?.monthly || "?"}/mo`);
-  fillSelect($("#createForm").image, images, (item) => item.id, (item) => item.label || item.id);
-  fillSelect($("#createForm").firewall_id, firewalls, (item) => item.id, (item) => item.label || item.id, "不绑定");
+  fillSelect($("#createForm").region, state.catalog.regions?.data || [], (item) => item.id, (item) => `${item.label || item.id} (${item.id})`);
+  fillSelect($("#createForm").type, state.catalog.types?.data || [], (item) => item.id, (item) => `${item.label || item.id} - $${item.price?.monthly || "?"}/mo`);
+  fillSelect($("#createForm").image, state.catalog.images?.data || [], (item) => item.id, (item) => item.label || item.id);
+  fillSelect($("#createForm").firewall_id, state.catalog.firewalls?.data || [], (item) => item.id, (item) => item.label || item.id, "不绑定");
 }
 
 function fillSelect(select, items, valueOf, labelOf, emptyLabel) {
@@ -315,15 +276,10 @@ function fillSelect(select, items, valueOf, labelOf, emptyLabel) {
 async function loadFirewalls() {
   try {
     $("#firewallList").innerHTML = "加载中...";
-    const data = await api("/api/linode/firewalls");
+    const data = await api("linode/firewalls");
     const items = data.data || [];
     $("#firewallList").innerHTML = items.length ? items.map((item) => `
-      <div class="row">
-        <strong>${escapeHTML(item.label)}</strong>
-        <span>${escapeHTML(item.status || "-")}</span>
-        <span>入站 ${item.rules?.inbound?.length || 0}</span>
-        <span>出站 ${item.rules?.outbound?.length || 0}</span>
-      </div>
+      <div class="row"><strong>${escapeHTML(item.label)}</strong><span>${escapeHTML(item.status || "-")}</span><span>入站 ${item.rules?.inbound?.length || 0}</span><span>出站 ${item.rules?.outbound?.length || 0}</span></div>
     `).join("") : "还没有防火墙。";
   } catch (err) {
     $("#firewallList").textContent = err.message;
@@ -331,7 +287,7 @@ async function loadFirewalls() {
 }
 
 async function createDefaultFirewall() {
-  if (!requireConfirm("创建默认防火墙，开放 SSH、HTTP、HTTPS 入站？")) return;
+  if (!window.confirm("创建默认防火墙，开放 SSH、HTTP、HTTPS 入站？")) return;
   const payload = {
     label: `linode-panel-default-${Date.now()}`,
     rules: {
@@ -345,7 +301,7 @@ async function createDefaultFirewall() {
     },
   };
   try {
-    await api("/api/linode/firewalls", { method: "POST", body: JSON.stringify(payload) });
+    await api("linode/firewalls", { method: "POST", body: JSON.stringify(payload) });
     showNotice("默认防火墙已创建", "success");
     await loadFirewalls();
     state.catalog = null;
@@ -357,15 +313,10 @@ async function createDefaultFirewall() {
 async function loadEvents() {
   try {
     $("#eventList").innerHTML = "加载中...";
-    const data = await api("/api/linode/events");
+    const data = await api("linode/events");
     const items = (data.data || []).slice(0, 30);
     $("#eventList").innerHTML = items.length ? items.map((item) => `
-      <div class="row">
-        <strong>${escapeHTML(item.action || "-")}</strong>
-        <span>${escapeHTML(item.status || "-")}</span>
-        <span>${escapeHTML(item.entity?.label || item.entity?.id || "-")}</span>
-        <span>${escapeHTML(formatTime(item.created))}</span>
-      </div>
+      <div class="row"><strong>${escapeHTML(item.action || "-")}</strong><span>${escapeHTML(item.status || "-")}</span><span>${escapeHTML(item.entity?.label || item.entity?.id || "-")}</span><span>${escapeHTML(formatTime(item.created))}</span></div>
     `).join("") : "还没有事件。";
   } catch (err) {
     $("#eventList").textContent = err.message;
@@ -373,23 +324,14 @@ async function loadEvents() {
 }
 
 async function logout() {
-  await api("/api/logout", { method: "POST", body: "{}" });
+  await api("logout", { method: "POST", body: "{}" });
   state.authenticated = false;
   renderShell();
 }
 
-function formatTime(value) {
-  if (!value) return "-";
-  return new Date(value).toLocaleString();
-}
-
+function formatTime(value) { return value ? new Date(value).toLocaleString() : "-"; }
 function escapeHTML(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
+  return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
 }
 
 init();

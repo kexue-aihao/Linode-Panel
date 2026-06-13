@@ -3,5 +3,6 @@
 bin/
 data/
 mysql-data/
+config.php
 *.exe
 *.log
