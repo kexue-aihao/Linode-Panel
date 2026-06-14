@@ -288,11 +288,21 @@ try {
             lp_json(200, ['data' => $accounts->list()]);
         }
         if ($method === 'POST') {
-            lp_json(201, $accounts->add(lp_read_json()));
+            $account = $accounts->add(lp_read_json());
+            $notifications->sendIfEnabled(
+                "Linode Panel 号池新增账号\n"
+                . "名称: " . ($account['label'] ?: '-') . "\n"
+                . "用户: " . (($account['username'] ?: $account['email']) ?: '-') . "\n"
+                . "Token: " . ($account['token_masked'] ?: '-') . "\n"
+                . "默认账号: " . ($account['is_default'] ? '是' : '否') . "\n"
+                . "代理: " . (($account['proxy_name'] ?: $account['proxy_label']) ?: '不使用代理') . "\n"
+                . "时间: " . gmdate('Y-m-d H:i:s') . ' UTC'
+            );
+            lp_json(201, $account);
         }
     }
 
-    if (preg_match('#^linode/accounts/(\d+)(?:/(check|default))?$#', $action, $matches)) {
+    if (preg_match('#^linode/accounts/(\d+)(?:/(check|default|info|promo-code))?$#', $action, $matches)) {
         $id = (int)$matches[1];
         $sub = $matches[2] ?? '';
         if ($method === 'DELETE' && $sub === '') {
@@ -304,6 +314,13 @@ try {
         }
         if ($method === 'POST' && $sub === 'default') {
             lp_json(200, $accounts->setDefault($id));
+        }
+        if ($method === 'GET' && $sub === 'info') {
+            lp_json(200, $accounts->accountInfo($id));
+        }
+        if ($method === 'POST' && $sub === 'promo-code') {
+            $body = lp_read_json();
+            lp_json(200, $accounts->applyPromoCode($id, (string)($body['promo_code'] ?? $body['code'] ?? '')));
         }
     }
 

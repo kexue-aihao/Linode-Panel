@@ -144,6 +144,11 @@ function bindNavigation() {
     $("#officialApiForm").elements.payload.value = "";
     $("#officialApiResult").textContent = "请求体已清空。";
   });
+  $("#closeAccountModalBtn").addEventListener("click", closeAccountModal);
+  $("#accountModalOkBtn").addEventListener("click", closeAccountModal);
+  $("#accountModal").addEventListener("click", (event) => {
+    if (event.target.id === "accountModal") closeAccountModal();
+  });
 }
 
 function bindForms() {
@@ -177,6 +182,7 @@ function bindForms() {
   $("#replenishForm").addEventListener("submit", submitReplenish);
   $("#notificationForm").addEventListener("submit", submitNotification);
   $("#securityForm").addEventListener("submit", submitSecurity);
+  $("#promoCodeForm").addEventListener("submit", submitPromoCode);
 }
 
 function setView(view, options = {}) {
@@ -453,15 +459,86 @@ function renderAccountList() {
         <div>${escapeHTML(item.proxy_name || "不使用代理")}</div>
         <div>${escapeHTML(item.status)}${item.last_error ? `<span>${escapeHTML(item.last_error)}</span>` : ""}</div>
         <div class="row-actions">
+          <button class="secondary small" data-account-info="${item.id}">账户信息</button>
+          <button class="secondary small" data-account-promo="${item.id}">优惠码</button>
           <button class="secondary small" data-account-check="${item.id}">检测</button>
           <button class="secondary small" data-account-default="${item.id}">设默认</button>
           <button class="danger small" data-account-delete="${item.id}">删除</button>
         </div>
       </div>`).join("")
     : `<div class="row single">还没有 Linode 号池账号。</div>`;
+  $$("[data-account-info]").forEach((button) => button.addEventListener("click", () => showAccountInfo(button.dataset.accountInfo)));
+  $$("[data-account-promo]").forEach((button) => button.addEventListener("click", () => openPromoCode(button.dataset.accountPromo)));
   $$("[data-account-check]").forEach((button) => button.addEventListener("click", () => checkAccount(button.dataset.accountCheck)));
   $$("[data-account-default]").forEach((button) => button.addEventListener("click", () => setDefaultAccount(button.dataset.accountDefault)));
   $$("[data-account-delete]").forEach((button) => button.addEventListener("click", () => deleteAccount(button.dataset.accountDelete)));
+}
+
+async function showAccountInfo(id) {
+  openAccountModal("账户信息", "正在读取账户信息...");
+  $("#promoCodeForm").classList.add("hidden");
+  try {
+    const data = await api(`linode/accounts/${id}/info`);
+    renderAccountInfo(data);
+  } catch (err) {
+    $("#accountInfoBody").innerHTML = `<p class="modal-error">${escapeHTML(err.message)}</p>`;
+  }
+}
+
+function openPromoCode(id) {
+  const account = state.accounts.find((item) => String(item.id) === String(id));
+  openAccountModal("应用优惠码", account ? `为 ${escapeHTML(account.label)} 应用优惠码。` : "请输入优惠码。");
+  const form = $("#promoCodeForm");
+  form.classList.remove("hidden");
+  form.elements.account_id.value = id;
+  form.elements.promo_code.value = "";
+  form.elements.promo_code.focus();
+}
+
+async function submitPromoCode(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const id = form.elements.account_id.value;
+  const code = form.elements.promo_code.value.trim();
+  if (!code) return showNotice("请填写优惠码", "error");
+  if (!window.confirm(`确认应用优惠码 ${code}？`)) return;
+  $("#accountInfoBody").textContent = "正在应用优惠码...";
+  try {
+    const data = await api(`linode/accounts/${id}/promo-code`, { method: "POST", body: JSON.stringify({ promo_code: code }) });
+    renderAccountInfo(data.info);
+    form.elements.promo_code.value = "";
+    showNotice("优惠码已提交应用", "success");
+  } catch (err) {
+    $("#accountInfoBody").innerHTML = `<p class="modal-error">${escapeHTML(err.message)}</p>`;
+    showNotice(err.message, "error");
+  }
+}
+
+function openAccountModal(title, content = "") {
+  $("#accountModalTitle").textContent = title;
+  $("#accountInfoBody").innerHTML = `<p>${escapeHTML(content)}</p>`;
+  $("#accountModal").classList.remove("hidden");
+}
+
+function closeAccountModal() {
+  $("#accountModal").classList.add("hidden");
+  $("#promoCodeForm").classList.add("hidden");
+}
+
+function renderAccountInfo(data) {
+  const summary = data.summary || {};
+  const rows = [
+    ["邮箱", summary.email || data.profile?.email || "-"],
+    ["注册时间", formatFullDate(summary.created)],
+    ["未出账", formatMoney(summary.uninvoiced)],
+    ["未付账单", formatMoney(summary.balance)],
+    ["优惠内容", summary.promotion_code || "-"],
+    ["优惠过期时间", formatFullDate(summary.promotion_expires)],
+    ["优惠剩余金额", formatMoney(summary.promotion_remaining)],
+  ];
+  $("#accountInfoBody").innerHTML = rows.map(([label, value]) => `
+    <div class="account-info-row"><span>${escapeHTML(label)}:</span><strong>${escapeHTML(value)}</strong></div>
+  `).join("");
 }
 
 async function checkAccount(id) {
@@ -1052,6 +1129,20 @@ function fillSelect(select, items, valueFn, labelFn, includeEmpty = false) {
 function formatTime(value) {
   if (!value) return "-";
   return String(value).replace("T", " ").replace("+00:00", "");
+}
+
+function formatFullDate(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toString();
+}
+
+function formatMoney(value) {
+  if (value === null || value === undefined || value === "") return "-";
+  const number = Number(value);
+  if (!Number.isFinite(number)) return String(value);
+  return number.toFixed(2);
 }
 
 function formatUptimeHours(value) {

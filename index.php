@@ -388,6 +388,24 @@ function asset_url(string $path): string
       </main>
     </div>
 
+    <div id="accountModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="accountModalTitle">
+      <div class="modal-card">
+        <div class="modal-head">
+          <h2 id="accountModalTitle">账户信息</h2>
+          <button id="closeAccountModalBtn" class="ghost small" type="button">×</button>
+        </div>
+        <div id="accountInfoBody" class="account-info-body"></div>
+        <form id="promoCodeForm" class="promo-form">
+          <input type="hidden" name="account_id" />
+          <label>优惠码<input name="promo_code" placeholder="请输入优惠码" autocomplete="off" /></label>
+          <button class="primary" type="submit">应用</button>
+        </form>
+        <div class="modal-actions">
+          <button id="accountModalOkBtn" class="primary" type="button">OK</button>
+        </div>
+      </div>
+    </div>
+
     <script src="<?= asset_url('assets/app.js') ?>"></script>
   </body>
 </html>

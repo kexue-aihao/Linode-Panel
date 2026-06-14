@@ -91,7 +91,7 @@ final class LinodeAccountPool
     {
         $account = $this->privateAccount($id);
         try {
-            $client = new LinodeClient((string)$account['token'], '', $this->proxies->getRuntimeById((int)($account['proxy_profile_id'] ?? 0)));
+            $client = $this->clientForAccount($account);
             $profile = $client->request('GET', '/v4/profile');
             $stmt = $this->pdo->prepare(
                 "UPDATE linode_accounts
@@ -111,6 +111,43 @@ final class LinodeAccountPool
             $this->logger?->log('linode_account', 'check', 'failed', 'Linode 账号检测失败：' . $e->getMessage(), ['account_id' => $id]);
             return ['ok' => false, 'error' => $e->getMessage(), 'account' => $this->find($id)];
         }
+    }
+
+    public function accountInfo(int $id): array
+    {
+        $account = $this->privateAccount($id);
+        $client = $this->clientForAccount($account);
+        $profile = $client->request('GET', '/v4/profile');
+        $billing = $client->request('GET', '/v4/account');
+        $public = $this->find($id);
+
+        $this->logger?->log('linode_account', 'info', 'success', 'Linode 账户信息已读取', ['account_id' => $id]);
+        return [
+            'account' => $public,
+            'profile' => $profile,
+            'billing' => $billing,
+            'summary' => $this->accountSummary($profile, $billing),
+        ];
+    }
+
+    public function applyPromoCode(int $id, string $code): array
+    {
+        $code = trim($code);
+        if ($code === '') {
+            throw new RuntimeException('请填写优惠码');
+        }
+
+        $account = $this->privateAccount($id);
+        $client = $this->clientForAccount($account);
+        $result = $client->request('POST', '/v4/account/promo-codes', ['promo_code' => $code]);
+        $info = $this->accountInfo($id);
+        $this->logger?->log('linode_account', 'promo_code', 'success', 'Linode 优惠码已应用：' . $code, ['account_id' => $id]);
+
+        return [
+            'ok' => true,
+            'result' => $result,
+            'info' => $info,
+        ];
     }
 
     public function defaultClient(): LinodeClient
@@ -135,6 +172,35 @@ final class LinodeAccountPool
     public function countAvailable(): int
     {
         return (int)$this->pdo->query("SELECT COUNT(*) FROM linode_accounts WHERE status = 'available'")->fetchColumn();
+    }
+
+    private function clientForAccount(array $account): LinodeClient
+    {
+        return new LinodeClient(
+            (string)$account['token'],
+            '',
+            $this->proxies->getRuntimeById((int)($account['proxy_profile_id'] ?? 0))
+        );
+    }
+
+    private function accountSummary(array $profile, array $billing): array
+    {
+        $activePromotions = $billing['active_promotions'] ?? [];
+        $promotion = is_array($activePromotions) && isset($activePromotions[0]) && is_array($activePromotions[0])
+            ? $activePromotions[0]
+            : [];
+
+        return [
+            'email' => (string)($profile['email'] ?? ''),
+            'username' => (string)($profile['username'] ?? ''),
+            'created' => (string)($profile['created'] ?? $billing['created'] ?? ''),
+            'balance' => $billing['balance'] ?? null,
+            'uninvoiced' => $billing['uninvoiced_balance'] ?? $billing['uninvoiced'] ?? null,
+            'promotion_code' => (string)($promotion['code'] ?? $promotion['summary'] ?? $promotion['description'] ?? ''),
+            'promotion_expires' => (string)($promotion['expire_dt'] ?? $promotion['expires'] ?? $promotion['expiration'] ?? ''),
+            'promotion_remaining' => $promotion['remaining'] ?? $promotion['credit_remaining'] ?? $promotion['amount_remaining'] ?? null,
+            'active_promotions' => is_array($activePromotions) ? $activePromotions : [],
+        ];
     }
 
     private function find(int $id): array
