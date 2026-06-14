@@ -42,6 +42,9 @@ final class ProxyManager
     public function add(array $data): array
     {
         $proxy = $this->normalizeProxy($data);
+        if (!empty($data['validate'])) {
+            $this->validateConnection($proxy);
+        }
         $name = trim((string)($data['name'] ?? ''));
         if ($name === '') {
             $name = strtoupper($proxy['type']) . ' ' . $proxy['host'];

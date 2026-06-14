@@ -381,14 +381,104 @@ async function submitProxy(event) {
   const payload = Object.fromEntries(new FormData(form).entries());
   payload.validate = form.validate.checked;
   payload.proxy_api_limit = Number(payload.proxy_api_limit || 10);
+  payload.proxy_api_url = normalizeProxyApiUrl(payload.proxy_api_url || "");
   try {
-    const result = await api("proxies", { method: "POST", body: JSON.stringify(payload) });
+    const result = payload.proxy_api_url ? await importProxyApiWithProgress(payload) : await api("proxies", { method: "POST", body: JSON.stringify(payload) });
     showNotice(result.mode === "api" ? `代理 API 导入完成：成功 ${result.imported} 个，失败 ${result.failed} 个` : "代理已添加", "success");
     form.password.value = "";
     await loadProxies(true);
   } catch (err) {
+    finishProxyProgress("failed", err.message);
     showNotice(err.message, "error");
   }
+}
+
+function normalizeProxyApiUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  return raw.replace(/\s+/g, "");
+}
+
+async function importProxyApiWithProgress(payload) {
+  setProxyProgress({ visible: true, title: "正在拉取代理 API", done: 0, total: 0, text: "正在请求代理接口并解析返回内容。", results: [] });
+  const parsed = await api("proxies/api/parse", { method: "POST", body: JSON.stringify(payload) });
+  const candidates = (parsed.proxies || [])
+    .map((item, index) => item.proxy ? item : { name: `API代理-${index + 1}`, proxy: item })
+    .filter((item) => item.proxy?.host && item.proxy?.port)
+    .slice(0, payload.proxy_api_limit || 10);
+  const errors = [...(parsed.errors || [])];
+  if (!candidates.length) {
+    const message = `代理 API 未解析到可导入代理。已识别 ${parsed.total_candidates || 0} 条。`;
+    finishProxyProgress("failed", message);
+    throw new Error(errors.slice(0, 3).join("；") || message);
+  }
+
+  let imported = 0;
+  const progressRows = [];
+  setProxyProgress({ visible: true, title: "正在逐条测活并导入", done: 0, total: candidates.length, text: "开始验证代理端口连通性。", results: progressRows });
+
+  for (let index = 0; index < candidates.length; index++) {
+    const item = candidates[index];
+    const proxy = item.proxy;
+    const namePrefix = String(payload.name || "").trim();
+    const savePayload = {
+      name: namePrefix ? `${namePrefix}-${index + 1}` : item.name || `API代理-${index + 1}`,
+      type: proxy.type,
+      host: proxy.host,
+      port: proxy.port,
+      username: proxy.username || "",
+      password: proxy.password || "",
+      validate: true,
+      source: "api",
+    };
+
+    setProxyProgress({ visible: true, title: "正在测活代理", done: index, total: candidates.length, text: `${savePayload.host}:${savePayload.port}`, results: progressRows });
+    try {
+      const saved = await api("proxies", { method: "POST", body: JSON.stringify(savePayload) });
+      imported++;
+      progressRows.unshift({ status: "success", message: `${saved.name} 可用，已保存` });
+    } catch (err) {
+      const message = `${savePayload.host}:${savePayload.port} 不可用：${err.message}`;
+      errors.push(message);
+      progressRows.unshift({ status: "failed", message });
+    }
+    setProxyProgress({ visible: true, title: "正在逐条测活并导入", done: index + 1, total: candidates.length, text: `已处理 ${index + 1}/${candidates.length}，成功 ${imported} 个，失败 ${errors.length} 个`, results: progressRows });
+  }
+
+  finishProxyProgress(imported > 0 ? "success" : "failed", `导入完成：成功 ${imported} 个，失败 ${errors.length} 个`);
+  return {
+    mode: "api",
+    raw_type: parsed.raw_type,
+    total_candidates: parsed.total_candidates,
+    imported,
+    failed: errors.length,
+    errors: errors.slice(0, 20),
+  };
+}
+
+function setProxyProgress({ visible, title, done, total, text, results }) {
+  const panel = $("#proxyImportProgress");
+  if (!panel) return;
+  panel.classList.toggle("hidden", !visible);
+  panel.classList.remove("success", "failed");
+  $("#proxyProgressTitle").textContent = title || "正在处理代理";
+  $("#proxyProgressCount").textContent = total ? `${done}/${total}` : "准备中";
+  $("#proxyProgressText").textContent = text || "";
+  const percent = total ? Math.max(4, Math.round((done / total) * 100)) : 12;
+  $("#proxyProgressBar").style.width = `${Math.min(100, percent)}%`;
+  if (Array.isArray(results)) {
+    $("#proxyProgressResults").innerHTML = results.slice(0, 8).map((item) => `<div class="progress-result ${item.status}">${escapeHTML(item.message)}</div>`).join("");
+  }
+}
+
+function finishProxyProgress(status, message) {
+  const panel = $("#proxyImportProgress");
+  if (!panel || panel.classList.contains("hidden")) return;
+  panel.classList.remove("success", "failed");
+  panel.classList.add(status);
+  $("#proxyProgressTitle").textContent = status === "success" ? "代理导入完成" : "代理导入失败";
+  $("#proxyProgressText").textContent = message || "";
+  if (status === "success") $("#proxyProgressBar").style.width = "100%";
 }
 
 function renderProxyList() {

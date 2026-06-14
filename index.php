@@ -129,28 +129,58 @@ function asset_url(string $path): string
 
         <section id="view-proxies" class="view">
           <div class="workspace wide-workspace">
-            <form id="proxyForm" class="panel">
+            <form id="proxyForm" class="panel proxy-compose">
               <div class="panel-head">
                 <div>
-                  <h2>外部代理配置</h2>
-                  <p class="muted">支持 HTTP、SOCKS5，支持代理 API 批量导入。</p>
+                  <h2>添加自托管代理</h2>
+                  <p class="muted">这里配置固定自托管代理，支持手动添加 HTTP/SOCKS 代理，或通过代理 API 批量导入。</p>
                 </div>
               </div>
-              <div class="form-grid two">
-                <label class="span-two">代理 API 链接<input name="proxy_api_url" placeholder="https://www.miyaip.com/api/ProxyLogic/Generate?...&GenType=socks5" /></label>
-                <label>API 协议<select name="raw_type"><option value="auto">自动识别</option><option value="socks5">SOCKS5</option><option value="http">HTTP</option></select></label>
-                <label>导入数量<input name="proxy_api_limit" type="number" min="1" max="100" value="10" /></label>
-                <label>代理名称<input name="name" placeholder="US Proxy" /></label>
-                <label>类型<select name="type"><option value="socks5">SOCKS5</option><option value="http">HTTP</option></select></label>
-                <label>主机<input name="host" placeholder="127.0.0.1" /></label>
-                <label>端口<input name="port" type="number" min="1" max="65535" placeholder="7890" /></label>
-                <label>用户名<input name="username" autocomplete="off" /></label>
-                <label>密码<input name="password" type="password" autocomplete="off" /></label>
+              <div class="proxy-api-box">
+                <label>代理 API 链接（可选，支持批量导入）
+                  <textarea name="proxy_api_url" rows="4" placeholder="例如 https://www.miyaip.com/api/ProxyLogic/Generate?&#10;Num=10&SessionTime=30&Server=us&Format=0&Crc=...&GenType=socks5"></textarea>
+                </label>
+                <div class="proxy-api-controls">
+                  <label>
+                    <select name="raw_type">
+                      <option value="auto">自动识别 http/socks</option>
+                      <option value="socks5">SOCKS5</option>
+                      <option value="http">HTTP</option>
+                    </select>
+                  </label>
+                  <label><input name="proxy_api_limit" type="number" min="1" max="100" value="10" /></label>
+                  <p class="muted">API 返回支持一行一个代理、JSON 数组、或嵌套字段；若链接里有 GenType=socks5/http，会自动按该协议优先识别。</p>
+                </div>
+                <p class="muted">填写代理 API 链接后点击下方提交，会自动拉取、解析、逐条验证并保存可用代理；API Key 会只保存在页面请求中，不会写入数据库。</p>
               </div>
-              <div class="toggle-row">
-                <label><input type="checkbox" name="validate" /> 保存前测活</label>
+              <div class="form-grid proxy-manual-grid">
+                <label class="span-two"><input name="name" placeholder="标注或批量导入前缀" /></label>
+                <label class="span-two">
+                  <select name="type">
+                    <option value="http">http</option>
+                    <option value="socks5">socks5</option>
+                  </select>
+                </label>
+                <label class="proxy-host"><input name="host" placeholder="主机名，例如 127.0.0.1" /></label>
+                <label class="proxy-port"><input name="port" type="number" min="1" max="65535" placeholder="0" /></label>
+                <label class="span-two"><input name="username" autocomplete="off" placeholder="用户名" /></label>
+                <label class="span-two"><input name="password" type="password" autocomplete="off" placeholder="密码（可选）" /></label>
               </div>
-              <button class="primary" type="submit">提交代理</button>
+              <div class="proxy-submit-row">
+                <p class="muted">保存前会验证代理端口可连接，验证通过后可在账号、开机和补机流程中选择使用。</p>
+                <label class="hidden"><input type="checkbox" name="validate" checked /> 保存前测活</label>
+                <button class="primary" type="submit">验证并提交</button>
+              </div>
+              <div id="proxyImportProgress" class="proxy-progress hidden">
+                <div class="proxy-progress-head">
+                  <span class="spinner"></span>
+                  <strong id="proxyProgressTitle">正在准备代理导入</strong>
+                  <span id="proxyProgressCount">0/0</span>
+                </div>
+                <div class="progress-track"><div id="proxyProgressBar" class="progress-bar"></div></div>
+                <p id="proxyProgressText" class="muted">等待开始。</p>
+                <div id="proxyProgressResults" class="progress-results"></div>
+              </div>
             </form>
             <div class="panel">
               <div class="panel-head">
