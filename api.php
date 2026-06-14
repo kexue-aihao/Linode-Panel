@@ -50,7 +50,7 @@ try {
         if (strlen($password) < 10) {
             lp_error(400, '管理员密码至少需要 10 位');
         }
-        $settings = $store->setup($adminUser, $password, trim((string)($body['linode_token'] ?? '')));
+        $settings = $store->setup($adminUser, $password);
         Auth::login($settings['admin_user']);
         lp_json(200, $store->publicSettings());
     }

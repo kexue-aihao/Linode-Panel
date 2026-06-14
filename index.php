@@ -49,11 +49,10 @@ declare(strict_types=1);
         <section id="authPanel" class="auth-panel hidden">
           <div class="auth-card">
             <h2 id="authTitle">初始化面板</h2>
-            <p id="authHint">创建本面板的管理员账号，并保存 Linode Token。</p>
+            <p id="authHint">先创建本面板的管理员账号，进入面板后再到设置中保存 Linode Token。</p>
             <form id="authForm" class="form-grid">
               <label>管理员<input id="authUser" autocomplete="username" placeholder="admin" /></label>
               <label>密码<input id="authPassword" type="password" autocomplete="current-password" placeholder="至少 10 位" /></label>
-              <label id="authTokenWrap">Linode Token<input id="authToken" type="password" autocomplete="off" placeholder="Personal Access Token" /></label>
               <button class="primary wide" type="submit">继续</button>
             </form>
           </div>
@@ -138,4 +137,3 @@ declare(strict_types=1);
     <script src="assets/app.js"></script>
   </body>
 </html>
-

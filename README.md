@@ -227,7 +227,8 @@ https://linode.example.com
 
 - 面板管理员用户名
 - 面板管理员密码
-- Linode Personal Access Token
+
+初始化完成后会自动进入面板。请打开“设置”，在 `Linode Token` 中填写并保存 Linode Personal Access Token，然后再加载实例、创建实例或管理防火墙。
 
 ## Linode Token 权限建议
 

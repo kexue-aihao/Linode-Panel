@@ -55,14 +55,14 @@ async function loadSession() {
 
 function renderShell() {
   const locked = !state.configured || !state.authenticated;
+  $("#app").classList.toggle("auth-mode", locked);
   $("#authPanel").classList.toggle("hidden", !locked);
   $$(".view").forEach((view) => view.classList.toggle("hidden", locked));
   $(".topbar").classList.toggle("hidden", locked);
   $(".sidebar").classList.toggle("hidden", locked);
   if (locked) {
     $("#authTitle").textContent = state.configured ? "登录面板" : "初始化面板";
-    $("#authHint").textContent = state.configured ? "输入管理员账号继续管理 Linode。" : "创建本面板的管理员账号，并保存 Linode Token。";
-    $("#authTokenWrap").classList.toggle("hidden", state.configured);
+    $("#authHint").textContent = state.configured ? "输入管理员账号继续管理 Linode。" : "先创建本面板的管理员账号，进入面板后再到设置中保存 Linode Token。";
     $("#authUser").value = state.settings.admin_user || "admin";
     return;
   }
@@ -89,17 +89,17 @@ function bindForms() {
     event.preventDefault();
     const payload = { admin_user: $("#authUser").value.trim() || "admin", password: $("#authPassword").value };
     const endpoint = state.configured ? "login" : "setup";
-    if (!state.configured) payload.linode_token = $("#authToken").value.trim();
+    const isFirstSetup = !state.configured;
     try {
       const settings = await api(endpoint, { method: "POST", body: JSON.stringify(payload) });
       state.configured = true;
       state.authenticated = true;
       state.settings = settings;
       $("#authPassword").value = "";
-      $("#authToken").value = "";
+      state.view = isFirstSetup && !settings.has_linode_token ? "settings" : state.view;
       renderShell();
-      showNotice("已进入面板", "success");
-      await loadInstances();
+      showNotice(isFirstSetup ? "管理员账号已创建，请在设置中保存 Linode Token" : "已进入面板", "success");
+      if (state.settings.has_linode_token) await loadInstances();
     } catch (err) {
       showNotice(err.message, "error");
     }
@@ -335,4 +335,3 @@ function escapeHTML(value) {
 }
 
 init();
-

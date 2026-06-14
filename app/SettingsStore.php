@@ -34,7 +34,7 @@ final class SettingsStore
         return $settings['admin_user'] !== '' && $settings['password_hash'] !== '';
     }
 
-    public function setup(string $adminUser, string $password, string $token): array
+    public function setup(string $adminUser, string $password): array
     {
         if ($this->isConfigured()) {
             throw new \RuntimeException('面板已经初始化');
@@ -44,11 +44,11 @@ final class SettingsStore
         $secret = Database::randomSecret();
         $stmt = $this->pdo->prepare(
             "UPDATE panel_settings
-             SET version = 1, admin_user = ?, password_hash = ?, linode_token = ?, proxy_url = '',
+             SET version = 1, admin_user = ?, password_hash = ?, linode_token = '', proxy_url = '',
                  session_secret = ?, updated_at = UTC_TIMESTAMP()
              WHERE id = 1"
         );
-        $stmt->execute([$adminUser, $hash, $token, $secret]);
+        $stmt->execute([$adminUser, $hash, $secret]);
         return $this->get();
     }
 
