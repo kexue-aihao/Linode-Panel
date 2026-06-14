@@ -1,5 +1,12 @@
 <?php
 declare(strict_types=1);
+
+function asset_url(string $path): string
+{
+    $file = __DIR__ . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $path);
+    $version = is_file($file) ? (string)filemtime($file) : '1';
+    return htmlspecialchars($path . '?v=' . $version, ENT_QUOTES, 'UTF-8');
+}
 ?>
 <!doctype html>
 <html lang="zh-CN">
@@ -7,7 +14,7 @@ declare(strict_types=1);
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Linode Panel</title>
-    <link rel="stylesheet" href="assets/styles.css" />
+    <link rel="stylesheet" href="<?= asset_url('assets/styles.css') ?>" />
   </head>
   <body>
     <div id="app">
@@ -134,6 +141,6 @@ declare(strict_types=1);
       </main>
     </div>
 
-    <script src="assets/app.js"></script>
+    <script src="<?= asset_url('assets/app.js') ?>"></script>
   </body>
 </html>

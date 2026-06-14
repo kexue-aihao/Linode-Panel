@@ -55,7 +55,7 @@ async function loadSession() {
 
 function renderShell() {
   const locked = !state.configured || !state.authenticated;
-  $("#app").classList.toggle("auth-mode", locked);
+  $("#app")?.classList.toggle("auth-mode", locked);
   $("#authPanel").classList.toggle("hidden", !locked);
   $$(".view").forEach((view) => view.classList.toggle("hidden", locked));
   $(".topbar").classList.toggle("hidden", locked);
