@@ -1,13 +1,36 @@
-const state = { configured: false, authenticated: false, settings: {}, view: "instances", catalog: null };
+const state = {
+  configured: false,
+  authenticated: false,
+  settings: {},
+  view: "vms",
+  catalog: null,
+  proxies: [],
+  accounts: [],
+  dnsConfigs: [],
+  dnsBindings: [],
+  replenishPolicies: [],
+  notifications: null,
+  logs: [],
+  admin: null,
+};
+
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-const apiPath = (action) => `api.php?action=${encodeURIComponent(action)}`;
+const apiPath = (action) => {
+  const [name, query = ""] = String(action).split("?", 2);
+  return `api.php?action=${encodeURIComponent(name)}${query ? `&${query}` : ""}`;
+};
+
 const titles = {
-  instances: ["实例", "查看状态、IP、套餐和生命周期操作。"],
-  create: ["创建", "选择区域、套餐、镜像并启动新实例。"],
-  firewalls: ["防火墙", "管理常用入站规则和实例绑定前的安全基线。"],
-  events: ["事件", "查看创建、开关机、重建等异步操作进度。"],
-  settings: ["设置", "管理面板账号、Linode Token 和代理。"],
+  vms: ["VM 管理", "查看 Linode 实例状态、IP 和生命周期操作。"],
+  accounts: ["Linode 号池", "维护多个 Linode Token，可为账号绑定外部代理。"],
+  proxies: ["代理配置", "管理 HTTP/SOCKS5 外部代理，支持代理 API 批量导入。"],
+  dns: ["DNS 管理", "内部集成彩虹 DNS 面板接入、域名和解析记录管理。"],
+  replenish: ["自动补机", "保留补机入口，组合号池、代理、DNS 和通知数据。"],
+  notifications: ["通知设置", "配置 Telegram Bot Token、个人和群组 Chat ID。"],
+  logs: ["执行日志", "查看账号、代理、DNS、通知和实例操作日志。"],
+  security: ["账号安全", "修改管理员账号和密码。"],
+  admin: ["管理员后台", "查看面板资源统计和运行环境。"],
 };
 
 async function api(action, options = {}) {
@@ -47,7 +70,7 @@ async function loadSession() {
     state.authenticated = session.authenticated;
     state.settings = session.settings || {};
     renderShell();
-    if (state.authenticated) await loadInstances();
+    if (state.authenticated) await refreshCurrent();
   } catch (err) {
     showNotice(err.message, "error");
   }
@@ -62,26 +85,30 @@ function renderShell() {
   $(".sidebar").classList.toggle("hidden", locked);
   if (locked) {
     $("#authTitle").textContent = state.configured ? "登录面板" : "初始化面板";
-    $("#authHint").textContent = state.configured ? "输入管理员账号继续管理 Linode。" : "先创建本面板的管理员账号，进入面板后再到设置中保存 Linode Token。";
+    $("#authHint").textContent = state.configured
+      ? "输入管理员账号继续管理 Linode。"
+      : "先创建本面板的管理员账号，进入面板后再到 Linode 号池添加 Token。";
     $("#authUser").value = state.settings.admin_user || "admin";
     return;
   }
-  $("#tokenState").textContent = state.settings.has_linode_token ? "Token 已保存" : "未连接";
-  $("#tokenState").classList.toggle("muted", !state.settings.has_linode_token);
-  const settingsForm = $("#settingsForm");
-  settingsForm.admin_user.value = state.settings.admin_user || "admin";
-  settingsForm.proxy_url.value = state.settings.proxy_url || "";
-  setView(state.view);
+  $("#tokenState").textContent = state.settings.has_linode_token || state.accounts.length ? "Token 已保存" : "未连接";
+  $("#tokenState").classList.toggle("muted", !(state.settings.has_linode_token || state.accounts.length));
+  setView(state.view, { silent: true });
 }
 
 function bindNavigation() {
   $$(".nav-item").forEach((button) => button.addEventListener("click", () => setView(button.dataset.view)));
   $$("[data-jump]").forEach((button) => button.addEventListener("click", () => setView(button.dataset.jump)));
-  $("#refreshBtn").addEventListener("click", () => refreshCurrent());
+  $$("[data-open-create]").forEach((button) => button.addEventListener("click", () => openCreatePanel()));
+  $$("[data-close-create]").forEach((button) => button.addEventListener("click", () => $("#createForm").classList.add("hidden")));
+  $("#refreshBtn").addEventListener("click", () => refreshCurrent(true));
   $("#logoutBtn").addEventListener("click", logout);
   $("#loadCatalogBtn").addEventListener("click", () => loadCatalog(true));
-  $("#loadEventsBtn").addEventListener("click", loadEvents);
-  $("#createDefaultFirewallBtn").addEventListener("click", createDefaultFirewall);
+  $("#checkPoolBtn").addEventListener("click", loadAccounts);
+  $("#checkAllProxiesBtn").addEventListener("click", checkAllProxies);
+  $("#loadDnsDomainsBtn").addEventListener("click", loadDnsDomains);
+  $("#testNotifyBtn").addEventListener("click", testNotification);
+  $("#exportLogsBtn").addEventListener("click", exportLogs);
 }
 
 function bindForms() {
@@ -89,102 +116,53 @@ function bindForms() {
     event.preventDefault();
     const payload = { admin_user: $("#authUser").value.trim() || "admin", password: $("#authPassword").value };
     const endpoint = state.configured ? "login" : "setup";
-    const isFirstSetup = !state.configured;
+    const firstSetup = !state.configured;
     try {
       const settings = await api(endpoint, { method: "POST", body: JSON.stringify(payload) });
       state.configured = true;
       state.authenticated = true;
       state.settings = settings;
       $("#authPassword").value = "";
-      state.view = isFirstSetup && !settings.has_linode_token ? "settings" : state.view;
+      state.view = firstSetup ? "accounts" : state.view;
       renderShell();
-      showNotice(isFirstSetup ? "管理员账号已创建，请在设置中保存 Linode Token" : "已进入面板", "success");
-      if (state.settings.has_linode_token) await loadInstances();
+      showNotice(firstSetup ? "管理员账号已创建，请添加 Linode 号池 Token" : "已进入面板", "success");
+      await refreshCurrent();
     } catch (err) {
       showNotice(err.message, "error");
     }
   });
 
-  $("#settingsForm").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const payload = {
-      admin_user: form.admin_user.value.trim(),
-      password: form.password.value,
-      linode_token: form.linode_token.value.trim(),
-      proxy_url: form.proxy_url.value.trim(),
-      clear_linode_token: form.clear_linode_token.checked,
-      clear_proxy_url: form.clear_proxy_url.checked,
-    };
-    if (!payload.password) delete payload.password;
-    if (!payload.linode_token) delete payload.linode_token;
-    if (!payload.proxy_url) delete payload.proxy_url;
-    try {
-      state.settings = await api("settings", { method: "PUT", body: JSON.stringify(payload) });
-      form.password.value = "";
-      form.linode_token.value = "";
-      form.clear_linode_token.checked = false;
-      form.clear_proxy_url.checked = false;
-      renderShell();
-      showNotice("设置已保存", "success");
-    } catch (err) {
-      showNotice(err.message, "error");
-    }
-  });
-
-  $("#createForm").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    if (!window.confirm("确认创建 Linode 实例？该操作会产生费用。")) return;
-    const form = event.currentTarget;
-    const rootPass = form.root_pass.value;
-    const keys = form.authorized_keys.value.split(/\n+/).map((item) => item.trim()).filter(Boolean);
-    if (!rootPass && keys.length === 0) {
-      showNotice("请填写 Root 密码或至少一个 SSH 公钥", "error");
-      return;
-    }
-    const payload = {
-      label: form.label.value.trim(),
-      region: form.region.value,
-      type: form.type.value,
-      image: form.image.value,
-      backups_enabled: form.backups_enabled.checked,
-      private_ip: form.private_ip.checked,
-    };
-    if (rootPass) payload.root_pass = rootPass;
-    if (keys.length) payload.authorized_keys = keys;
-    if (form.firewall_id.value) payload.firewall_id = Number(form.firewall_id.value);
-    const tags = form.tags.value.split(",").map((item) => item.trim()).filter(Boolean);
-    if (tags.length) payload.tags = tags;
-    try {
-      const instance = await api("linode/instances", { method: "POST", body: JSON.stringify(payload) });
-      showNotice(`实例 ${instance.label || payload.label} 已提交创建`, "success");
-      form.root_pass.value = "";
-      setView("instances");
-      await loadInstances();
-    } catch (err) {
-      showNotice(err.message, "error");
-    }
-  });
+  $("#createForm").addEventListener("submit", submitCreateInstance);
+  $("#accountForm").addEventListener("submit", submitAccount);
+  $("#proxyForm").addEventListener("submit", submitProxy);
+  $("#dnsConfigForm").addEventListener("submit", submitDnsConfig);
+  $("#dnsRecordForm").addEventListener("submit", submitDnsRecord);
+  $("#dnsBindingForm").addEventListener("submit", submitDnsBinding);
+  $("#replenishForm").addEventListener("submit", submitReplenish);
+  $("#notificationForm").addEventListener("submit", submitNotification);
+  $("#securityForm").addEventListener("submit", submitSecurity);
 }
 
-function setView(view) {
+function setView(view, options = {}) {
   state.view = view;
   $$(".nav-item").forEach((button) => button.classList.toggle("active", button.dataset.view === view));
   $$(".view").forEach((node) => node.classList.toggle("active", node.id === `view-${view}`));
-  const [title, subtitle] = titles[view] || titles.instances;
+  const [title, subtitle] = titles[view] || titles.vms;
   $("#viewTitle").textContent = title;
   $("#viewSubtitle").textContent = subtitle;
-  if (view === "create" && !state.catalog) loadCatalog();
-  if (view === "firewalls") loadFirewalls();
-  if (view === "events") loadEvents();
+  if (!options.silent) refreshCurrent();
 }
 
-async function refreshCurrent() {
-  if (state.view === "instances") return loadInstances();
-  if (state.view === "create") return loadCatalog(true);
-  if (state.view === "firewalls") return loadFirewalls();
-  if (state.view === "events") return loadEvents();
-  return loadSession();
+async function refreshCurrent(force = false) {
+  if (state.view === "vms") return loadInstances();
+  if (state.view === "accounts") return Promise.all([loadProxies(), loadAccounts()]);
+  if (state.view === "proxies") return loadProxies(force);
+  if (state.view === "dns") return loadDns();
+  if (state.view === "replenish") return loadReplenish();
+  if (state.view === "notifications") return loadNotifications();
+  if (state.view === "logs") return loadLogs();
+  if (state.view === "security") return loadSecurity();
+  if (state.view === "admin") return loadAdmin();
 }
 
 async function loadInstances() {
@@ -193,13 +171,72 @@ async function loadInstances() {
     const data = await api("linode/instances");
     const instances = data.data || [];
     if (!instances.length) {
-      $("#instanceGrid").innerHTML = `<div class="panel">还没有实例。</div>`;
+      $("#instanceGrid").innerHTML = `<div class="panel">还没有实例。你可以点击右上角创建实例。</div>`;
       return;
     }
     $("#instanceGrid").innerHTML = instances.map(instanceCard).join("");
     $$(".instance-card [data-action]").forEach((button) => button.addEventListener("click", () => instanceAction(button.dataset.id, button.dataset.action, button.dataset.label)));
   } catch (err) {
     $("#instanceGrid").innerHTML = `<div class="panel">${escapeHTML(err.message)}</div>`;
+  }
+}
+
+function openCreatePanel() {
+  setView("vms", { silent: true });
+  $("#createForm").classList.remove("hidden");
+  if (!state.catalog) loadCatalog();
+}
+
+async function loadCatalog(force = false) {
+  if (state.catalog && !force) return populateCatalog();
+  try {
+    state.catalog = await api("linode/catalog");
+    populateCatalog();
+    showNotice("创建选项已载入", "success");
+  } catch (err) {
+    showNotice(err.message, "error");
+  }
+}
+
+function populateCatalog() {
+  if (!state.catalog) return;
+  fillSelect($("#createForm").region, state.catalog.regions?.data || [], (item) => item.id, (item) => `${item.label || item.id} (${item.id})`);
+  fillSelect($("#createForm").type, state.catalog.types?.data || [], (item) => item.id, (item) => `${item.label || item.id} ${item.price?.monthly ? `$${item.price.monthly}/月` : ""}`);
+  fillSelect($("#createForm").image, state.catalog.images?.data || [], (item) => item.id, (item) => item.label || item.id);
+  fillSelect($("#createForm").firewall_id, state.catalog.firewalls?.data || [], (item) => item.id, (item) => `${item.label || item.id}`, true);
+}
+
+async function submitCreateInstance(event) {
+  event.preventDefault();
+  if (!window.confirm("确认创建 Linode 实例？该操作会产生费用。")) return;
+  const form = event.currentTarget;
+  const rootPass = form.root_pass.value;
+  const keys = form.authorized_keys.value.split(/\n+/).map((item) => item.trim()).filter(Boolean);
+  if (!rootPass && keys.length === 0) {
+    showNotice("请填写 Root 密码或至少一个 SSH 公钥", "error");
+    return;
+  }
+  const payload = {
+    label: form.label.value.trim(),
+    region: form.region.value,
+    type: form.type.value,
+    image: form.image.value,
+    backups_enabled: form.backups_enabled.checked,
+    private_ip: form.private_ip.checked,
+  };
+  if (rootPass) payload.root_pass = rootPass;
+  if (keys.length) payload.authorized_keys = keys;
+  if (form.firewall_id.value) payload.firewall_id = Number(form.firewall_id.value);
+  const tags = form.tags.value.split(",").map((item) => item.trim()).filter(Boolean);
+  if (tags.length) payload.tags = tags;
+  try {
+    const instance = await api("linode/instances", { method: "POST", body: JSON.stringify(payload) });
+    showNotice(`实例 ${instance.label || payload.label} 已提交创建`, "success");
+    form.root_pass.value = "";
+    $("#createForm").classList.add("hidden");
+    await loadInstances();
+  } catch (err) {
+    showNotice(err.message, "error");
   }
 }
 
@@ -232,11 +269,8 @@ async function instanceAction(id, action, label) {
   const names = { boot: "开机", reboot: "重启", shutdown: "关机", delete: "删除" };
   if (!window.confirm(`确认${names[action] || action}实例 ${label || id}？${action === "delete" ? " 删除后不可恢复。" : ""}`)) return;
   try {
-    if (action === "delete") {
-      await api(`linode/instances/${id}`, { method: "DELETE" });
-    } else {
-      await api(`linode/instances/${id}/${action}`, { method: "POST", body: "{}" });
-    }
+    if (action === "delete") await api(`linode/instances/${id}`, { method: "DELETE" });
+    else await api(`linode/instances/${id}/${action}`, { method: "POST", body: "{}" });
     showNotice(`已提交${names[action] || action}操作`, "success");
     await loadInstances();
   } catch (err) {
@@ -244,94 +278,565 @@ async function instanceAction(id, action, label) {
   }
 }
 
-async function loadCatalog(force = false) {
-  if (state.catalog && !force) return populateCatalog();
+async function loadAccounts() {
   try {
-    state.catalog = await api("linode/catalog");
-    populateCatalog();
-    showNotice("选项已载入", "success");
+    const data = await api("linode/accounts");
+    state.accounts = data.data || [];
+    renderAccountList();
+    $("#tokenState").textContent = state.settings.has_linode_token || state.accounts.length ? "Token 已保存" : "未连接";
+    $("#tokenState").classList.toggle("muted", !(state.settings.has_linode_token || state.accounts.length));
   } catch (err) {
-    showNotice(err.message, "error");
+    $("#accountList").innerHTML = `<div class="row single">${escapeHTML(err.message)}</div>`;
   }
 }
 
-function populateCatalog() {
-  if (!state.catalog) return;
-  fillSelect($("#createForm").region, state.catalog.regions?.data || [], (item) => item.id, (item) => `${item.label || item.id} (${item.id})`);
-  fillSelect($("#createForm").type, state.catalog.types?.data || [], (item) => item.id, (item) => `${item.label || item.id} - $${item.price?.monthly || "?"}/mo`);
-  fillSelect($("#createForm").image, state.catalog.images?.data || [], (item) => item.id, (item) => item.label || item.id);
-  fillSelect($("#createForm").firewall_id, state.catalog.firewalls?.data || [], (item) => item.id, (item) => item.label || item.id, "不绑定");
-}
-
-function fillSelect(select, items, valueOf, labelOf, emptyLabel) {
-  select.innerHTML = emptyLabel ? `<option value="">${emptyLabel}</option>` : "";
-  for (const item of items) {
-    const option = document.createElement("option");
-    option.value = valueOf(item);
-    option.textContent = labelOf(item);
-    select.appendChild(option);
-  }
-}
-
-async function loadFirewalls() {
-  try {
-    $("#firewallList").innerHTML = "加载中...";
-    const data = await api("linode/firewalls");
-    const items = data.data || [];
-    $("#firewallList").innerHTML = items.length ? items.map((item) => `
-      <div class="row"><strong>${escapeHTML(item.label)}</strong><span>${escapeHTML(item.status || "-")}</span><span>入站 ${item.rules?.inbound?.length || 0}</span><span>出站 ${item.rules?.outbound?.length || 0}</span></div>
-    `).join("") : "还没有防火墙。";
-  } catch (err) {
-    $("#firewallList").textContent = err.message;
-  }
-}
-
-async function createDefaultFirewall() {
-  if (!window.confirm("创建默认防火墙，开放 SSH、HTTP、HTTPS 入站？")) return;
+async function submitAccount(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
   const payload = {
-    label: `linode-panel-default-${Date.now()}`,
-    rules: {
-      inbound_policy: "DROP",
-      outbound_policy: "ACCEPT",
-      inbound: [
-        { action: "ACCEPT", protocol: "TCP", ports: "22", addresses: { ipv4: ["0.0.0.0/0"], ipv6: ["::/0"] }, label: "SSH" },
-        { action: "ACCEPT", protocol: "TCP", ports: "80,443", addresses: { ipv4: ["0.0.0.0/0"], ipv6: ["::/0"] }, label: "Web" },
-      ],
-      outbound: [],
-    },
+    label: form.label.value.trim(),
+    token: form.token.value.trim(),
+    proxy_profile_id: form.proxy_profile_id.value ? Number(form.proxy_profile_id.value) : 0,
+    remark: form.remark.value.trim(),
+    is_default: form.is_default.checked,
   };
   try {
-    await api("linode/firewalls", { method: "POST", body: JSON.stringify(payload) });
-    showNotice("默认防火墙已创建", "success");
-    await loadFirewalls();
-    state.catalog = null;
+    await api("linode/accounts", { method: "POST", body: JSON.stringify(payload) });
+    form.token.value = "";
+    showNotice("Linode 号池账号已添加", "success");
+    await loadAccounts();
   } catch (err) {
     showNotice(err.message, "error");
   }
 }
 
-async function loadEvents() {
+function renderAccountList() {
+  $("#accountList").innerHTML = state.accounts.length
+    ? state.accounts.map((item) => `
+      <div class="row account-row">
+        <div><strong>${escapeHTML(item.label)}</strong><span>${escapeHTML(item.email || item.username || item.token_masked || "-")}</span></div>
+        <div>${item.is_default ? '<span class="badge">默认</span>' : '<span class="badge offline">备用</span>'}</div>
+        <div>${escapeHTML(item.proxy_name || "不使用代理")}</div>
+        <div>${escapeHTML(item.status)}${item.last_error ? `<span>${escapeHTML(item.last_error)}</span>` : ""}</div>
+        <div class="row-actions">
+          <button class="secondary small" data-account-check="${item.id}">检测</button>
+          <button class="secondary small" data-account-default="${item.id}">设默认</button>
+          <button class="danger small" data-account-delete="${item.id}">删除</button>
+        </div>
+      </div>`).join("")
+    : `<div class="row single">还没有 Linode 号池账号。</div>`;
+  $$("[data-account-check]").forEach((button) => button.addEventListener("click", () => checkAccount(button.dataset.accountCheck)));
+  $$("[data-account-default]").forEach((button) => button.addEventListener("click", () => setDefaultAccount(button.dataset.accountDefault)));
+  $$("[data-account-delete]").forEach((button) => button.addEventListener("click", () => deleteAccount(button.dataset.accountDelete)));
+}
+
+async function checkAccount(id) {
   try {
-    $("#eventList").innerHTML = "加载中...";
-    const data = await api("linode/events");
-    const items = (data.data || []).slice(0, 30);
-    $("#eventList").innerHTML = items.length ? items.map((item) => `
-      <div class="row"><strong>${escapeHTML(item.action || "-")}</strong><span>${escapeHTML(item.status || "-")}</span><span>${escapeHTML(item.entity?.label || item.entity?.id || "-")}</span><span>${escapeHTML(formatTime(item.created))}</span></div>
-    `).join("") : "还没有事件。";
+    const result = await api(`linode/accounts/${id}/check`, { method: "POST", body: "{}" });
+    showNotice(result.ok ? "账号可用" : `账号检测失败：${result.error}`, result.ok ? "success" : "error");
+    await loadAccounts();
   } catch (err) {
-    $("#eventList").textContent = err.message;
+    showNotice(err.message, "error");
   }
+}
+
+async function setDefaultAccount(id) {
+  try {
+    await api(`linode/accounts/${id}/default`, { method: "POST", body: "{}" });
+    showNotice("默认账号已切换", "success");
+    await loadAccounts();
+  } catch (err) {
+    showNotice(err.message, "error");
+  }
+}
+
+async function deleteAccount(id) {
+  if (!window.confirm("确认删除这个 Linode 号池账号吗？")) return;
+  try {
+    await api(`linode/accounts/${id}`, { method: "DELETE" });
+    showNotice("账号已删除", "success");
+    await loadAccounts();
+  } catch (err) {
+    showNotice(err.message, "error");
+  }
+}
+
+async function loadProxies(force = false) {
+  if (state.proxies.length && !force && state.view !== "proxies" && state.view !== "accounts") {
+    return;
+  }
+  try {
+    const data = await api("proxies");
+    state.proxies = data.data || [];
+    renderProxyList();
+    fillProxySelects();
+  } catch (err) {
+    $("#proxyList").innerHTML = `<div class="row single">${escapeHTML(err.message)}</div>`;
+  }
+}
+
+async function submitProxy(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const payload = Object.fromEntries(new FormData(form).entries());
+  payload.validate = form.validate.checked;
+  payload.proxy_api_limit = Number(payload.proxy_api_limit || 10);
+  try {
+    const result = await api("proxies", { method: "POST", body: JSON.stringify(payload) });
+    showNotice(result.mode === "api" ? `代理 API 导入完成：成功 ${result.imported} 个，失败 ${result.failed} 个` : "代理已添加", "success");
+    form.password.value = "";
+    await loadProxies(true);
+  } catch (err) {
+    showNotice(err.message, "error");
+  }
+}
+
+function renderProxyList() {
+  const node = $("#proxyList");
+  if (!node) return;
+  node.innerHTML = state.proxies.length
+    ? state.proxies.map((proxy) => `
+      <div class="row proxy-row">
+        <div><strong>${escapeHTML(proxy.name)}</strong><span>${escapeHTML(proxy.label)}</span></div>
+        <div>${proxy.type.toUpperCase()}</div>
+        <div>${escapeHTML(proxy.source || "fixed")}</div>
+        <div>${escapeHTML(proxy.status || "unknown")}${proxy.last_error ? `<span>${escapeHTML(proxy.last_error)}</span>` : ""}</div>
+        <div class="row-actions">
+          <button class="secondary small" data-proxy-check="${proxy.id}">测活</button>
+          <button class="danger small" data-proxy-delete="${proxy.id}">删除</button>
+        </div>
+      </div>`).join("")
+    : `<div class="row single">还没有代理配置。可手动添加或填写代理 API 链接批量导入。</div>`;
+  $$("[data-proxy-check]").forEach((button) => button.addEventListener("click", () => checkProxy(button.dataset.proxyCheck)));
+  $$("[data-proxy-delete]").forEach((button) => button.addEventListener("click", () => deleteProxy(button.dataset.proxyDelete)));
+}
+
+async function checkProxy(id, silent = false) {
+  const result = await api(`proxies/${id}/check`, { method: "POST", body: JSON.stringify({ delete_on_fail: false }) });
+  if (!silent) showNotice(result.message, result.status === "available" ? "success" : "error");
+  await loadProxies(true);
+  return result;
+}
+
+async function checkAllProxies() {
+  if (!state.proxies.length) return showNotice("没有可测活的代理", "error");
+  let available = 0;
+  let failed = 0;
+  for (const proxy of state.proxies) {
+    try {
+      const result = await checkProxy(proxy.id, true);
+      if (result.status === "available") available++;
+      else failed++;
+    } catch {
+      failed++;
+    }
+  }
+  showNotice(`代理测活完成：可用 ${available} 个，失败 ${failed} 个`, failed ? "error" : "success");
+}
+
+async function deleteProxy(id) {
+  if (!window.confirm("确认删除这个代理配置吗？")) return;
+  try {
+    await api(`proxies/${id}`, { method: "DELETE" });
+    showNotice("代理已删除", "success");
+    await loadProxies(true);
+  } catch (err) {
+    showNotice(err.message, "error");
+  }
+}
+
+function fillProxySelects() {
+  $$('select[name="proxy_profile_id"]').forEach((select) => {
+    const current = select.value;
+    select.innerHTML = `<option value="">不使用代理</option>` + state.proxies.map((proxy) => `<option value="${proxy.id}">${escapeHTML(proxy.name)} - ${escapeHTML(proxy.label)}</option>`).join("");
+    select.value = current;
+  });
+}
+
+async function loadDns() {
+  try {
+    const [data, bindings] = await Promise.all([api("dns/configs"), api("dns/bindings")]);
+    state.dnsConfigs = data.data || [];
+    state.dnsBindings = bindings.data || [];
+    renderDnsConfigs();
+    renderDnsBindings();
+    fillDnsConfigSelects();
+  } catch (err) {
+    $("#dnsConfigList").innerHTML = `<div class="row single">${escapeHTML(err.message)}</div>`;
+  }
+}
+
+function renderDnsBindings() {
+  const node = $("#dnsBindingList");
+  if (!node) return;
+  node.innerHTML = state.dnsBindings.length
+    ? `<div class="section-label">DNS 绑定</div>` + state.dnsBindings.map((binding) => `
+      <div class="row dns-row">
+        <div><strong>${escapeHTML(binding.name)}</strong><span>${escapeHTML(binding.fqdn)}</span></div>
+        <div>${escapeHTML(binding.record_type)}</div>
+        <div>${binding.enabled ? '<span class="badge">启用</span>' : '<span class="badge offline">停用</span>'}</div>
+        <div class="row-actions"><button class="danger small" data-dns-binding-delete="${binding.id}">删除</button></div>
+      </div>`).join("")
+    : `<div class="row single">还没有 DNS 绑定。保存绑定后可用于自动补机和 IP 同步。</div>`;
+  $$("[data-dns-binding-delete]").forEach((button) => button.addEventListener("click", () => deleteDnsBinding(button.dataset.dnsBindingDelete)));
+}
+
+async function submitDnsConfig(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const payload = Object.fromEntries(new FormData(form).entries());
+  payload.enabled = form.enabled.checked;
+  payload.uid = Number(payload.uid || 0);
+  if (!payload.id) delete payload.id;
+  try {
+    await api("dns/configs", { method: "POST", body: JSON.stringify(payload) });
+    form.password.value = "";
+    form.api_key.value = "";
+    showNotice("DNS 配置已保存", "success");
+    await loadDns();
+  } catch (err) {
+    showNotice(err.message, "error");
+  }
+}
+
+function renderDnsConfigs() {
+  $("#dnsConfigList").innerHTML = state.dnsConfigs.length
+    ? state.dnsConfigs.map((cfg) => `
+      <div class="row dns-row">
+        <div><strong>${escapeHTML(cfg.name)}</strong><span>${escapeHTML(cfg.base_url)}</span></div>
+        <div>${cfg.auth_mode === "password" ? "账号密码" : "API Key"}</div>
+        <div>${cfg.enabled ? '<span class="badge">启用</span>' : '<span class="badge offline">停用</span>'}</div>
+        <div class="row-actions">
+          <button class="secondary small" data-dns-test="${cfg.id}">测试</button>
+          <button class="secondary small" data-dns-domains="${cfg.id}">域名</button>
+          <button class="danger small" data-dns-delete="${cfg.id}">删除</button>
+        </div>
+      </div>`).join("")
+    : `<div class="row single">还没有 DNS 配置。</div>`;
+  $$("[data-dns-test]").forEach((button) => button.addEventListener("click", () => testDns(button.dataset.dnsTest)));
+  $$("[data-dns-domains]").forEach((button) => button.addEventListener("click", () => loadDnsDomains(button.dataset.dnsDomains)));
+  $$("[data-dns-delete]").forEach((button) => button.addEventListener("click", () => deleteDnsConfig(button.dataset.dnsDelete)));
+}
+
+function fillDnsConfigSelects() {
+  $$('select[name="config_id"]').forEach((select) => {
+    const current = select.value;
+    select.innerHTML = state.dnsConfigs.map((cfg) => `<option value="${cfg.id}">${escapeHTML(cfg.name)}</option>`).join("");
+    select.value = current || state.dnsConfigs[0]?.id || "";
+  });
+}
+
+async function testDns(id) {
+  try {
+    const result = await api(`dns/configs/${id}/test`, { method: "POST", body: "{}" });
+    showNotice(`DNS 连接成功，域名数量：${result.total}`, "success");
+  } catch (err) {
+    showNotice(err.message, "error");
+  }
+}
+
+async function loadDnsDomains(id = "") {
+  const configId = id || $("#dnsRecordForm").config_id.value;
+  if (!configId) return showNotice("请先选择 DNS 配置", "error");
+  try {
+    const result = await api(`dns/configs/${configId}/domains`);
+    $("#dnsDomainList").innerHTML = (result.rows || []).length
+      ? result.rows.map((domain) => `
+        <div class="row dns-domain-row">
+          <div><strong>${escapeHTML(domain.name || "-")}</strong><span>域名 ID：${escapeHTML(domain.id || "-")}</span></div>
+          <div>记录数：${escapeHTML(domain.recordcount ?? "-")}</div>
+          <div>${escapeHTML(domain.typename || domain.type || "")}</div>
+          <div class="row-actions"><button class="secondary small" data-fill-domain="${domain.id}" data-domain-name="${escapeHTML(domain.name || "")}">填入表单</button></div>
+        </div>`).join("")
+      : `<div class="row single">未读取到域名。</div>`;
+    $$("[data-fill-domain]").forEach((button) => button.addEventListener("click", () => {
+      $("#dnsRecordForm").domain_id.value = button.dataset.fillDomain;
+      showNotice(`已填入域名：${button.dataset.domainName}`, "success");
+    }));
+  } catch (err) {
+    showNotice(err.message, "error");
+  }
+}
+
+async function submitDnsRecord(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const payload = Object.fromEntries(new FormData(form).entries());
+  const configId = payload.config_id;
+  const domainId = payload.domain_id;
+  try {
+    await api(`dns/configs/${configId}/records?domain_id=${encodeURIComponent(domainId)}`, { method: "POST", body: JSON.stringify(payload) });
+    showNotice("DNS 解析记录已保存", "success");
+  } catch (err) {
+    showNotice(err.message, "error");
+  }
+}
+
+async function submitDnsBinding(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const payload = Object.fromEntries(new FormData(form).entries());
+  payload.enabled = form.enabled.checked;
+  payload.domain_id = Number(payload.domain_id || 0);
+  payload.ttl = Number(payload.ttl || 60);
+  try {
+    await api("dns/bindings", { method: "POST", body: JSON.stringify(payload) });
+    showNotice("DNS 绑定已保存", "success");
+    await loadDns();
+  } catch (err) {
+    showNotice(err.message, "error");
+  }
+}
+
+async function deleteDnsConfig(id) {
+  if (!window.confirm("确认删除这个 DNS 配置和相关绑定吗？")) return;
+  try {
+    await api(`dns/configs/${id}`, { method: "DELETE" });
+    showNotice("DNS 配置已删除", "success");
+    await loadDns();
+  } catch (err) {
+    showNotice(err.message, "error");
+  }
+}
+
+async function deleteDnsBinding(id) {
+  if (!window.confirm("确认删除这个 DNS 绑定吗？")) return;
+  try {
+    await api(`dns/bindings/${id}`, { method: "DELETE" });
+    showNotice("DNS 绑定已删除", "success");
+    await loadDns();
+  } catch (err) {
+    showNotice(err.message, "error");
+  }
+}
+
+async function loadNotifications() {
+  try {
+    state.notifications = await api("notifications");
+    const form = $("#notificationForm");
+    form.enabled.checked = state.notifications.enabled;
+    form.telegram_chat_id.value = state.notifications.telegram_chat_id || "";
+    form.telegram_group_chat_ids.value = state.notifications.telegram_group_chat_ids || "";
+    form.check_interval_hours.value = state.notifications.check_interval_hours || 6;
+  } catch (err) {
+    showNotice(err.message, "error");
+  }
+}
+
+async function submitNotification(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const payload = Object.fromEntries(new FormData(form).entries());
+  payload.enabled = form.enabled.checked;
+  payload.check_interval_hours = Number(payload.check_interval_hours || 6);
+  try {
+    await api("notifications", { method: "POST", body: JSON.stringify(payload) });
+    form.bot_token.value = "";
+    showNotice("通知设置已保存", "success");
+    await loadNotifications();
+  } catch (err) {
+    showNotice(err.message, "error");
+  }
+}
+
+async function testNotification() {
+  try {
+    const result = await api("notifications/test", { method: "POST", body: JSON.stringify({ message: "Linode Panel 通知测试成功" }) });
+    showNotice(`测试完成：成功 ${result.sent.length} 个，失败 ${result.failed.length} 个`, result.sent.length ? "success" : "error");
+  } catch (err) {
+    showNotice(err.message, "error");
+  }
+}
+
+async function loadLogs() {
+  try {
+    const data = await api("logs?limit=200");
+    state.logs = data.data || [];
+    $("#logList").innerHTML = state.logs.length
+      ? state.logs.map((log) => `
+        <div class="row log-row">
+          <div><strong>${escapeHTML(log.action)}</strong><span>${escapeHTML(log.message)}</span></div>
+          <div>${escapeHTML(log.source)}</div>
+          <div>${escapeHTML(log.status)}</div>
+          <div>${formatTime(log.created_at)}</div>
+        </div>`).join("")
+      : `<div class="row single">暂无执行日志。</div>`;
+  } catch (err) {
+    $("#logList").innerHTML = `<div class="row single">${escapeHTML(err.message)}</div>`;
+  }
+}
+
+function exportLogs() {
+  const lines = state.logs.map((log) => `[${log.created_at}] ${log.source}/${log.action}/${log.status} ${log.message}`);
+  const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `linode-panel-logs-${Date.now()}.txt`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function loadSecurity() {
+  try {
+    const data = await api("security");
+    $("#securityForm").admin_user.value = data.admin_user || "admin";
+  } catch (err) {
+    showNotice(err.message, "error");
+  }
+}
+
+async function submitSecurity(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const payload = Object.fromEntries(new FormData(form).entries());
+  try {
+    state.settings = await api("security", { method: "POST", body: JSON.stringify(payload) });
+    form.current_password.value = "";
+    form.new_password.value = "";
+    showNotice("账号安全设置已保存", "success");
+  } catch (err) {
+    showNotice(err.message, "error");
+  }
+}
+
+async function loadAdmin() {
+  try {
+    state.admin = await api("admin/dashboard");
+    const stats = state.admin.stats || {};
+    $("#adminStats").innerHTML = [
+      ["Linode 号池", stats.linode_accounts],
+      ["可用账号", stats.available_accounts],
+      ["代理配置", stats.proxies],
+      ["DNS 配置", stats.dns_configs],
+      ["DNS 绑定", stats.dns_bindings],
+      ["补机策略", stats.replenish_policies],
+      ["执行日志", stats.logs],
+    ].map(([label, value]) => `<div class="meta"><span>${label}</span><strong>${value ?? 0}</strong></div>`).join("");
+    $("#adminUsers").innerHTML = (state.admin.users || []).map((user) => `
+      <div class="row admin-row">
+        <div><strong>${escapeHTML(user.email)}</strong><span>${escapeHTML(user.role)}</span></div>
+        <div>账号 ${user.account_count}</div>
+        <div>代理 ${user.proxy_count}</div>
+        <div>DNS ${user.dns_config_count}/${user.dns_binding_count}</div>
+        <div>策略 ${user.workflow_count}<span>日志 ${user.execution_log_count}</span></div>
+      </div>`).join("");
+  } catch (err) {
+    showNotice(err.message, "error");
+  }
+}
+
+async function loadReplenish() {
+  try {
+    const [data, policies, bindings] = await Promise.all([api("admin/dashboard"), api("replenish/policies"), api("dns/bindings")]);
+    const stats = data.stats || {};
+    state.replenishPolicies = policies.data || [];
+    state.dnsBindings = bindings.data || [];
+    $("#replenishStats").innerHTML = [
+      ["Linode 号池", stats.linode_accounts],
+      ["可用账号", stats.available_accounts],
+      ["代理池", stats.proxies],
+      ["DNS 绑定", stats.dns_bindings],
+    ].map(([label, value]) => `<div class="meta"><span>${label}</span><strong>${value ?? 0}</strong></div>`).join("");
+    fillDnsBindingSelects();
+    renderReplenishPolicies();
+  } catch (err) {
+    showNotice(err.message, "error");
+  }
+}
+
+async function submitReplenish(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const payload = Object.fromEntries(new FormData(form).entries());
+  payload.enabled = form.enabled.checked;
+  payload.backups_enabled = form.backups_enabled.checked;
+  payload.private_ip = form.private_ip.checked;
+  payload.target_count = Number(payload.target_count || 1);
+  payload.min_running_count = Number(payload.min_running_count || 0);
+  payload.firewall_id = Number(payload.firewall_id || 0);
+  payload.dns_binding_id = Number(payload.dns_binding_id || 0);
+  try {
+    await api("replenish/policies", { method: "POST", body: JSON.stringify(payload) });
+    form.root_pass.value = "";
+    showNotice("自动补机策略已保存", "success");
+    await loadReplenish();
+  } catch (err) {
+    showNotice(err.message, "error");
+  }
+}
+
+function renderReplenishPolicies() {
+  const node = $("#replenishList");
+  node.innerHTML = state.replenishPolicies.length
+    ? state.replenishPolicies.map((policy) => `
+      <div class="row account-row">
+        <div><strong>${escapeHTML(policy.name)}</strong><span>${escapeHTML(policy.name_prefix)} / ${escapeHTML(policy.region)}</span></div>
+        <div>${policy.enabled ? '<span class="badge">启用</span>' : '<span class="badge offline">停用</span>'}</div>
+        <div>${escapeHTML(policy.linode_type)}<span>${escapeHTML(policy.image)}</span></div>
+        <div>目标 ${policy.target_count}<span>最少运行 ${policy.min_running_count}</span></div>
+        <div class="row-actions">
+          <button class="secondary small" data-replenish-run="${policy.id}">执行一次</button>
+          <button class="danger small" data-replenish-delete="${policy.id}">删除</button>
+        </div>
+      </div>`).join("")
+    : `<div class="row single">还没有自动补机策略。</div>`;
+  $$("[data-replenish-run]").forEach((button) => button.addEventListener("click", () => runReplenish(button.dataset.replenishRun)));
+  $$("[data-replenish-delete]").forEach((button) => button.addEventListener("click", () => deleteReplenish(button.dataset.replenishDelete)));
+}
+
+async function runReplenish(id) {
+  if (!window.confirm("确认立即执行一次自动补机策略吗？可能会创建新的 Linode 并产生费用。")) return;
+  try {
+    const result = await api(`replenish/policies/${id}/run`, { method: "POST", body: "{}" });
+    showNotice(result.message, "success");
+    await loadReplenish();
+  } catch (err) {
+    showNotice(err.message, "error");
+  }
+}
+
+async function deleteReplenish(id) {
+  if (!window.confirm("确认删除这个自动补机策略吗？")) return;
+  try {
+    await api(`replenish/policies/${id}`, { method: "DELETE" });
+    showNotice("自动补机策略已删除", "success");
+    await loadReplenish();
+  } catch (err) {
+    showNotice(err.message, "error");
+  }
+}
+
+function fillDnsBindingSelects() {
+  $$('select[name="dns_binding_id"]').forEach((select) => {
+    const current = select.value;
+    select.innerHTML = `<option value="">不绑定</option>` + state.dnsBindings.map((binding) => `<option value="${binding.id}">${escapeHTML(binding.name)} - ${escapeHTML(binding.fqdn)}</option>`).join("");
+    select.value = current;
+  });
 }
 
 async function logout() {
-  await api("logout", { method: "POST", body: "{}" });
+  await api("logout", { method: "POST", body: "{}" }).catch(() => undefined);
   state.authenticated = false;
   renderShell();
 }
 
-function formatTime(value) { return value ? new Date(value).toLocaleString() : "-"; }
+function fillSelect(select, items, valueFn, labelFn, includeEmpty = false) {
+  select.innerHTML = `${includeEmpty ? '<option value="">不绑定</option>' : ""}${items.map((item) => `<option value="${escapeHTML(valueFn(item))}">${escapeHTML(labelFn(item))}</option>`).join("")}`;
+}
+
+function formatTime(value) {
+  if (!value) return "-";
+  return String(value).replace("T", " ").replace("+00:00", "");
+}
+
 function escapeHTML(value) {
-  return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 init();

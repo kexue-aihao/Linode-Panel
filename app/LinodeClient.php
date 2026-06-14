@@ -8,7 +8,8 @@ final class LinodeClient
 {
     public function __construct(
         private readonly string $token,
-        private readonly string $proxyUrl = ''
+        private readonly string $proxyUrl = '',
+        private readonly ?array $proxyConfig = null
     ) {
     }
 
@@ -30,7 +31,17 @@ final class LinodeClient
             CURLOPT_HTTPHEADER => $headers,
         ]);
 
-        if ($this->proxyUrl !== '') {
+        if ($this->proxyConfig !== null) {
+            curl_setopt($ch, CURLOPT_PROXY, $this->proxyConfig['host'] . ':' . $this->proxyConfig['port']);
+            if (($this->proxyConfig['type'] ?? '') === 'socks5') {
+                curl_setopt($ch, CURLOPT_PROXYTYPE, defined('CURLPROXY_SOCKS5_HOSTNAME') ? CURLPROXY_SOCKS5_HOSTNAME : CURLPROXY_SOCKS5);
+            }
+            $username = (string)($this->proxyConfig['username'] ?? '');
+            $password = (string)($this->proxyConfig['password'] ?? '');
+            if ($username !== '' || $password !== '') {
+                curl_setopt($ch, CURLOPT_PROXYUSERPWD, $username . ':' . $password);
+            }
+        } elseif ($this->proxyUrl !== '') {
             curl_setopt($ch, CURLOPT_PROXY, $this->proxyUrl);
         }
 
@@ -87,4 +98,3 @@ final class LinodeClient
         ];
     }
 }
-

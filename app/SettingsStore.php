@@ -100,6 +100,14 @@ final class SettingsStore
         return $this->get();
     }
 
+    public function setLinodeToken(string $token): void
+    {
+        $stmt = $this->pdo->prepare(
+            "UPDATE panel_settings SET linode_token = ?, updated_at = UTC_TIMESTAMP() WHERE id = 1"
+        );
+        $stmt->execute([$token]);
+    }
+
     public function publicSettings(): array
     {
         $settings = $this->get();
