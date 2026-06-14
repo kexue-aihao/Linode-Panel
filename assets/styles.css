@@ -126,6 +126,19 @@ input:focus, select:focus, textarea:focus { border-color: var(--brand); box-shad
 .progress-result { padding: 7px 9px; border-radius: 8px; font-size: 12px; overflow-wrap: anywhere; }
 .progress-result.success { background: #e9f7f4; color: #126846; }
 .progress-result.failed { background: #fff1f1; color: #9f2424; }
+.link-button { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+.api-console textarea, .api-result { font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; font-size: 12px; }
+.api-request-grid { grid-template-columns: 140px minmax(0, 1fr) 150px; align-items: end; margin-bottom: 14px; }
+.api-path-field { min-width: 0; }
+.api-list-all { display: flex; align-items: center; gap: 8px; min-height: 42px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); }
+.api-list-all input { width: 16px; min-height: 16px; }
+.api-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.api-template-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+.api-template-group { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); }
+.api-template-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.api-template { display: inline-flex; align-items: center; gap: 7px; }
+.api-template span { padding: 2px 5px; border-radius: 6px; background: #e9f7f4; color: var(--brand-strong); font-size: 11px; }
+.api-result { min-height: 260px; max-height: 560px; overflow: auto; margin: 0; padding: 14px; border: 1px solid var(--border); border-radius: 8px; background: #0f172a; color: #d8f3ef; white-space: pre-wrap; overflow-wrap: anywhere; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .status-dot { display: inline-flex; align-items: center; gap: 7px; color: #b8e3dc; font-size: 12px; }
 .status-dot::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
@@ -142,7 +155,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--brand); box-shad
   .auth-card { width: 100%; padding: 24px; }
   .topbar, .card-top { align-items: flex-start; flex-direction: column; }
   .form-grid.two, .row, .account-row, .proxy-row, .dns-row, .dns-domain-row, .log-row, .admin-row { grid-template-columns: 1fr; }
-  .proxy-api-controls, .proxy-manual-grid { grid-template-columns: 1fr; }
+  .proxy-api-controls, .proxy-manual-grid, .api-request-grid { grid-template-columns: 1fr; }
   .proxy-manual-grid .proxy-host, .proxy-manual-grid .proxy-port { grid-column: auto; }
   .span-two { grid-column: auto; }
   .row-actions { justify-content: flex-start; }

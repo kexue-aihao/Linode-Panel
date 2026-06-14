@@ -7,6 +7,7 @@ use LinodePanel\AdminManager;
 use LinodePanel\Database;
 use LinodePanel\ExecutionLogger;
 use LinodePanel\LinodeAccountPool;
+use LinodePanel\LinodeClient;
 use LinodePanel\LinodeException;
 use LinodePanel\NotificationManager;
 use LinodePanel\ProxyManager;
@@ -15,6 +16,93 @@ use LinodePanel\ReplenishManager;
 use LinodePanel\SettingsStore;
 
 require __DIR__ . '/app/bootstrap.php';
+
+function lp_attach_power_on_times(array $response, LinodeClient $client): array
+{
+    $instances = $response['data'] ?? [];
+    if (!is_array($instances) || $instances === []) {
+        return $response;
+    }
+
+    $instanceIds = [];
+    foreach ($instances as $instance) {
+        $id = (int)($instance['id'] ?? 0);
+        if ($id > 0) {
+            $instanceIds[$id] = true;
+        }
+    }
+
+    $eventTimes = [];
+    try {
+        $events = $client->request('GET', '/v4/account/events?page=1&page_size=200')['data'] ?? [];
+        $bootActions = ['linode_boot', 'linode_reboot', 'linode_create'];
+        foreach ($events as $event) {
+            $action = (string)($event['action'] ?? '');
+            $status = (string)($event['status'] ?? '');
+            $entityId = (int)($event['entity']['id'] ?? 0);
+            $created = (string)($event['created'] ?? '');
+            if (!isset($instanceIds[$entityId]) || !in_array($action, $bootActions, true) || $created === '' || $status === 'failed') {
+                continue;
+            }
+            $createdTs = strtotime($created) ?: 0;
+            $currentTs = strtotime((string)($eventTimes[$entityId]['time'] ?? '')) ?: 0;
+            if ($createdTs > $currentTs) {
+                $eventTimes[$entityId] = ['time' => $created, 'source' => $action];
+            }
+        }
+    } catch (Throwable) {
+        $eventTimes = [];
+    }
+
+    $now = time();
+    foreach ($instances as $index => $instance) {
+        $id = (int)($instance['id'] ?? 0);
+        $running = (string)($instance['status'] ?? '') === 'running';
+        $powerOnAt = '';
+        $source = '';
+
+        if ($running && isset($eventTimes[$id])) {
+            $powerOnAt = (string)$eventTimes[$id]['time'];
+            $source = (string)$eventTimes[$id]['source'];
+        } elseif ($running) {
+            $powerOnAt = (string)($instance['updated'] ?? $instance['created'] ?? '');
+            $source = $powerOnAt !== '' ? 'updated' : '';
+        }
+
+        $hours = null;
+        if ($powerOnAt !== '') {
+            $startedAt = strtotime($powerOnAt) ?: 0;
+            if ($startedAt > 0) {
+                $hours = max(0, (int)floor(($now - $startedAt) / 3600));
+            }
+        }
+
+        $instances[$index]['power_on_at'] = $powerOnAt;
+        $instances[$index]['power_on_source'] = $source;
+        $instances[$index]['uptime_hours'] = $hours;
+        $instances[$index]['uptime_display'] = $running ? lp_format_uptime_hours($hours) : '-';
+    }
+
+    $response['data'] = $instances;
+    return $response;
+}
+
+function lp_format_uptime_hours(?int $hours): string
+{
+    if ($hours === null) {
+        return '-';
+    }
+    if ($hours < 1) {
+        return '不足1小时';
+    }
+
+    $days = intdiv($hours, 24);
+    $remainingHours = $hours % 24;
+    if ($days > 0) {
+        return $days . '天' . ($remainingHours > 0 ? $remainingHours . '小时' : '');
+    }
+    return $hours . '小时';
+}
 
 try {
     $config = lp_config();
@@ -317,9 +405,43 @@ try {
         ]);
     }
 
+    if ($action === 'linode/api/official' && $method === 'POST') {
+        $body = lp_read_json();
+        $apiMethod = strtoupper(trim((string)($body['method'] ?? 'GET')));
+        $path = trim((string)($body['path'] ?? ''));
+        $listAll = !empty($body['list_all']);
+        $payload = $body['payload'] ?? null;
+
+        if (!in_array($apiMethod, ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], true)) {
+            lp_error(400, '请求方法只支持 GET、POST、PUT、PATCH、DELETE');
+        }
+        if (!str_starts_with($path, '/v4/')) {
+            lp_error(400, '官方 API 路径必须以 /v4/ 开头');
+        }
+        if (preg_match('#^/v4/(?:debug|internal|admin)(?:/|$)#i', $path)) {
+            lp_error(400, '不允许访问内部或调试路径');
+        }
+        if ($payload !== null && !is_array($payload)) {
+            lp_error(400, '请求体必须是 JSON 对象，留空表示不发送请求体');
+        }
+        if ($listAll && $apiMethod !== 'GET') {
+            lp_error(400, '自动翻页只支持 GET 请求');
+        }
+
+        $result = $listAll ? $client->listAll($path) : $client->request($apiMethod, $path, $payload);
+        $logger->log(
+            'linode',
+            'official_api',
+            'success',
+            '官方 API 已执行：' . $apiMethod . ' ' . $path,
+            ['method' => $apiMethod, 'path' => $path, 'list_all' => $listAll]
+        );
+        lp_json(200, ['ok' => true, 'method' => $apiMethod, 'path' => $path, 'result' => $result]);
+    }
+
     if ($action === 'linode/instances') {
         if ($method === 'GET') {
-            lp_json(200, $client->listAll('/v4/linode/instances'));
+            lp_json(200, lp_attach_power_on_times($client->listAll('/v4/linode/instances'), $client));
         }
         if ($method === 'POST') {
             lp_json(202, $client->request('POST', '/v4/linode/instances', lp_read_json()));
@@ -351,6 +473,30 @@ try {
                 lp_error(400, 'JSON 请求体不正确');
             }
             lp_json(202, $client->request('POST', $base . '/' . $sub, $payload));
+        }
+        if ($sub === 'allocate-ip' && $method === 'POST') {
+            $payload = [
+                'type' => 'ipv4',
+                'public' => true,
+                'linode_id' => $id,
+            ];
+            $result = $client->request('POST', '/v4/networking/ips', $payload);
+            $address = (string)($result['address'] ?? '');
+            $logger->log(
+                'linode',
+                'allocate_ip',
+                'success',
+                '已为 Linode 实例分配新的公网 IPv4' . ($address !== '' ? '：' . $address : ''),
+                ['linode_id' => $id, 'address' => $address]
+            );
+            lp_json(200, $result);
+        }
+        if ($sub === 'ddos-protection' && $method === 'GET') {
+            lp_json(200, [
+                'supported' => false,
+                'enabled_by_default' => null,
+                'message' => '未发现 Linode 官方 API 提供 VM 实例级 DDoS 防护开关；本面板不提供伪开启按钮，请以 Linode/Akamai 控制台或支持渠道显示的账号/平台防护状态为准。',
+            ]);
         }
         if (in_array($sub, ['ips', 'stats'], true) && $method === 'GET') {
             lp_json(200, $client->request('GET', $base . '/' . $sub));

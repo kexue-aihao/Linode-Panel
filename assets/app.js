@@ -23,6 +23,7 @@ const apiPath = (action) => {
 
 const titles = {
   vms: ["VM 管理", "查看 Linode 实例状态、IP 和生命周期操作。"],
+  officialApi: ["官方 API", "通过默认 Linode 号池 Token 调用官方 API v4 全部接口。"],
   accounts: ["Linode 号池", "维护多个 Linode Token，可为账号绑定外部代理。"],
   proxies: ["代理配置", "管理 HTTP/SOCKS5 外部代理，支持代理 API 批量导入。"],
   dns: ["DNS 管理", "内部集成彩虹 DNS 面板接入、域名和解析记录管理。"],
@@ -32,6 +33,36 @@ const titles = {
   security: ["账号安全", "修改管理员账号和密码。"],
   admin: ["管理员后台", "查看面板资源统计和运行环境。"],
 };
+
+const officialApiTemplates = [
+  { group: "账号", name: "当前账号资料", method: "GET", path: "/v4/profile", listAll: false, payload: "" },
+  { group: "账号", name: "账号信息", method: "GET", path: "/v4/account", listAll: false, payload: "" },
+  { group: "账号", name: "账单列表", method: "GET", path: "/v4/account/invoices", listAll: true, payload: "" },
+  { group: "账号", name: "事件列表", method: "GET", path: "/v4/account/events", listAll: true, payload: "" },
+  { group: "计算", name: "实例列表", method: "GET", path: "/v4/linode/instances", listAll: true, payload: "" },
+  { group: "计算", name: "创建实例示例", method: "POST", path: "/v4/linode/instances", listAll: false, payload: { label: "demo-linode", region: "us-east", type: "g6-nanode-1", image: "linode/ubuntu24.04", root_pass: "请改成强密码" } },
+  { group: "计算", name: "实例套餐", method: "GET", path: "/v4/linode/types", listAll: true, payload: "" },
+  { group: "计算", name: "公开镜像", method: "GET", path: "/v4/images?is_public=true", listAll: true, payload: "" },
+  { group: "计算", name: "StackScripts", method: "GET", path: "/v4/linode/stackscripts?is_public=true", listAll: true, payload: "" },
+  { group: "网络", name: "区域列表", method: "GET", path: "/v4/regions", listAll: true, payload: "" },
+  { group: "网络", name: "IP 列表", method: "GET", path: "/v4/networking/ips", listAll: true, payload: "" },
+  { group: "网络", name: "新增公网 IPv4", method: "POST", path: "/v4/networking/ips", listAll: false, payload: { type: "ipv4", public: true, linode_id: 123456 } },
+  { group: "网络", name: "防火墙列表", method: "GET", path: "/v4/networking/firewalls", listAll: true, payload: "" },
+  { group: "网络", name: "VPC 列表", method: "GET", path: "/v4/vpcs", listAll: true, payload: "" },
+  { group: "网络", name: "NodeBalancer 列表", method: "GET", path: "/v4/nodebalancers", listAll: true, payload: "" },
+  { group: "存储", name: "卷列表", method: "GET", path: "/v4/volumes", listAll: true, payload: "" },
+  { group: "存储", name: "创建卷示例", method: "POST", path: "/v4/volumes", listAll: false, payload: { label: "demo-volume", region: "us-east", size: 20 } },
+  { group: "对象存储", name: "对象存储集群", method: "GET", path: "/v4/object-storage/clusters", listAll: true, payload: "" },
+  { group: "对象存储", name: "Bucket 列表", method: "GET", path: "/v4/object-storage/buckets", listAll: true, payload: "" },
+  { group: "对象存储", name: "Access Key 列表", method: "GET", path: "/v4/object-storage/keys", listAll: true, payload: "" },
+  { group: "LKE", name: "Kubernetes 集群", method: "GET", path: "/v4/lke/clusters", listAll: true, payload: "" },
+  { group: "数据库", name: "MySQL 数据库", method: "GET", path: "/v4/databases/mysql/instances", listAll: true, payload: "" },
+  { group: "数据库", name: "PostgreSQL 数据库", method: "GET", path: "/v4/databases/postgresql/instances", listAll: true, payload: "" },
+  { group: "域名", name: "Linode DNS 域名", method: "GET", path: "/v4/domains", listAll: true, payload: "" },
+  { group: "支持", name: "工单列表", method: "GET", path: "/v4/support/tickets", listAll: true, payload: "" },
+  { group: "市场", name: "Marketplace 应用", method: "GET", path: "/v4/linode/stackscripts?is_public=true&mine=false", listAll: true, payload: "" },
+  { group: "Beta", name: "Beta 计划", method: "GET", path: "/v4/betas", listAll: true, payload: "" },
+];
 
 async function api(action, options = {}) {
   const res = await fetch(apiPath(action), {
@@ -109,6 +140,10 @@ function bindNavigation() {
   $("#loadDnsDomainsBtn").addEventListener("click", loadDnsDomains);
   $("#testNotifyBtn").addEventListener("click", testNotification);
   $("#exportLogsBtn").addEventListener("click", exportLogs);
+  $("#clearOfficialApiBodyBtn").addEventListener("click", () => {
+    $("#officialApiForm").elements.payload.value = "";
+    $("#officialApiResult").textContent = "请求体已清空。";
+  });
 }
 
 function bindForms() {
@@ -133,6 +168,7 @@ function bindForms() {
   });
 
   $("#createForm").addEventListener("submit", submitCreateInstance);
+  $("#officialApiForm").addEventListener("submit", submitOfficialApi);
   $("#accountForm").addEventListener("submit", submitAccount);
   $("#proxyForm").addEventListener("submit", submitProxy);
   $("#dnsConfigForm").addEventListener("submit", submitDnsConfig);
@@ -155,6 +191,7 @@ function setView(view, options = {}) {
 
 async function refreshCurrent(force = false) {
   if (state.view === "vms") return loadInstances();
+  if (state.view === "officialApi") return renderOfficialApiTemplates();
   if (state.view === "accounts") return Promise.all([loadProxies(), loadAccounts()]);
   if (state.view === "proxies") return loadProxies(force);
   if (state.view === "dns") return loadDns();
@@ -178,6 +215,79 @@ async function loadInstances() {
     $$(".instance-card [data-action]").forEach((button) => button.addEventListener("click", () => instanceAction(button.dataset.id, button.dataset.action, button.dataset.label)));
   } catch (err) {
     $("#instanceGrid").innerHTML = `<div class="panel">${escapeHTML(err.message)}</div>`;
+  }
+}
+
+function renderOfficialApiTemplates() {
+  const node = $("#officialApiTemplates");
+  if (!node) return;
+  const groups = officialApiTemplates.reduce((acc, item, index) => {
+    (acc[item.group] ||= []).push({ ...item, index });
+    return acc;
+  }, {});
+  node.innerHTML = Object.entries(groups).map(([group, items]) => `
+    <div class="api-template-group">
+      <h3>${escapeHTML(group)}</h3>
+      <div class="api-template-list">
+        ${items.map((item) => `
+          <button class="secondary small api-template" type="button" data-api-template="${item.index}">
+            <span>${escapeHTML(item.method)}</span>${escapeHTML(item.name)}
+          </button>`).join("")}
+      </div>
+    </div>`).join("");
+  $$("[data-api-template]").forEach((button) => button.addEventListener("click", () => applyOfficialApiTemplate(Number(button.dataset.apiTemplate))));
+}
+
+function applyOfficialApiTemplate(index) {
+  const template = officialApiTemplates[index];
+  if (!template) return;
+  const form = $("#officialApiForm");
+  form.elements.method.value = template.method;
+  form.elements.path.value = template.path;
+  form.elements.list_all.checked = !!template.listAll;
+  form.elements.payload.value = template.payload && typeof template.payload === "object" ? JSON.stringify(template.payload, null, 2) : "";
+  $("#officialApiResult").textContent = `已载入模板：${template.group} / ${template.name}`;
+}
+
+async function submitOfficialApi(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const method = form.elements.method.value.toUpperCase();
+  const path = form.elements.path.value.trim();
+  const bodyText = form.elements.payload.value.trim();
+  let payload = null;
+  if (bodyText) {
+    try {
+      payload = JSON.parse(bodyText);
+      if (!payload || Array.isArray(payload) || typeof payload !== "object") {
+        throw new Error("请求体必须是 JSON 对象");
+      }
+    } catch (err) {
+      showNotice(`JSON 请求体不正确：${err.message}`, "error");
+      return;
+    }
+  }
+  if (!path.startsWith("/v4/")) {
+    showNotice("官方 API 路径必须以 /v4/ 开头", "error");
+    return;
+  }
+  if (method !== "GET" && !window.confirm(`确认执行 ${method} ${path}？该操作可能会创建、修改、删除资源或产生费用。`)) return;
+  $("#officialApiResult").textContent = "正在执行官方 API...";
+  try {
+    const result = await api("linode/api/official", {
+      method: "POST",
+      body: JSON.stringify({
+        method,
+        path,
+        payload,
+        list_all: form.elements.list_all.checked,
+      }),
+    });
+    $("#officialApiResult").textContent = JSON.stringify(result.result, null, 2);
+    showNotice(`官方 API 已执行：${method} ${path}`, "success");
+  } catch (err) {
+    $("#officialApiResult").textContent = err.message;
+    showNotice(err.message, "error");
   }
 }
 
@@ -244,6 +354,7 @@ function instanceCard(item) {
   const statusClass = item.status === "running" ? "" : "offline";
   const ipv4 = (item.ipv4 || []).join(", ") || "-";
   const ipv6 = item.ipv6 || "-";
+  const uptime = item.status === "running" ? (item.uptime_display || formatUptimeHours(item.uptime_hours)) : "-";
   return `
     <article class="instance-card">
       <div class="card-top">
@@ -255,23 +366,46 @@ function instanceCard(item) {
         <div class="meta"><span>套餐</span><strong>${escapeHTML(item.type || "-")}</strong></div>
         <div class="meta"><span>IPv4</span><strong>${escapeHTML(ipv4)}</strong></div>
         <div class="meta"><span>IPv6</span><strong>${escapeHTML(ipv6)}</strong></div>
+        <div class="meta"><span>开机时长</span><strong>${escapeHTML(uptime)}</strong></div>
+        <div class="meta span-two"><span>DDoS 防护</span><strong>官方暂无 VM 实例级 API 开关</strong></div>
       </div>
       <div class="card-actions">
         <button class="secondary small" data-action="boot" data-id="${item.id}" data-label="${escapeHTML(item.label || "")}">开机</button>
         <button class="secondary small" data-action="reboot" data-id="${item.id}" data-label="${escapeHTML(item.label || "")}">重启</button>
         <button class="secondary small" data-action="shutdown" data-id="${item.id}" data-label="${escapeHTML(item.label || "")}">关机</button>
+        <button class="secondary small" data-action="allocate-ip" data-id="${item.id}" data-label="${escapeHTML(item.label || "")}">换 IP</button>
+        <button class="secondary small" data-action="ddos-protection" data-id="${item.id}" data-label="${escapeHTML(item.label || "")}">DDoS 说明</button>
         <button class="danger small" data-action="delete" data-id="${item.id}" data-label="${escapeHTML(item.label || "")}">删除</button>
       </div>
     </article>`;
 }
 
 async function instanceAction(id, action, label) {
-  const names = { boot: "开机", reboot: "重启", shutdown: "关机", delete: "删除" };
-  if (!window.confirm(`确认${names[action] || action}实例 ${label || id}？${action === "delete" ? " 删除后不可恢复。" : ""}`)) return;
+  const names = { boot: "开机", reboot: "重启", shutdown: "关机", delete: "删除", "allocate-ip": "换 IP", "ddos-protection": "查看 DDoS 说明" };
+  if (action === "ddos-protection") {
+    try {
+      const status = await api(`linode/instances/${id}/ddos-protection`);
+      showNotice(status.message || "Linode 官方暂无实例级 DDoS 防护 API 开关。");
+    } catch (err) {
+      showNotice(err.message, "error");
+    }
+    return;
+  }
+  const extra = action === "delete"
+    ? " 删除后不可恢复。"
+    : action === "allocate-ip"
+      ? " 将调用 Linode 官方 API 新增一个公网 IPv4；旧 IP 不会自动删除，请确认 DNS 和业务切换后再处理旧 IP。"
+      : "";
+  if (!window.confirm(`确认${names[action] || action}实例 ${label || id}？${extra}`)) return;
   try {
     if (action === "delete") await api(`linode/instances/${id}`, { method: "DELETE" });
-    else await api(`linode/instances/${id}/${action}`, { method: "POST", body: "{}" });
-    showNotice(`已提交${names[action] || action}操作`, "success");
+    else if (action === "allocate-ip") {
+      const result = await api(`linode/instances/${id}/allocate-ip`, { method: "POST", body: "{}" });
+      showNotice(`已分配新公网 IPv4：${result.address || "请刷新查看"}`, "success");
+    } else {
+      await api(`linode/instances/${id}/${action}`, { method: "POST", body: "{}" });
+      showNotice(`已提交${names[action] || action}操作`, "success");
+    }
     await loadInstances();
   } catch (err) {
     showNotice(err.message, "error");
@@ -918,6 +1052,17 @@ function fillSelect(select, items, valueFn, labelFn, includeEmpty = false) {
 function formatTime(value) {
   if (!value) return "-";
   return String(value).replace("T", " ").replace("+00:00", "");
+}
+
+function formatUptimeHours(value) {
+  const hours = Number(value);
+  if (!Number.isFinite(hours)) return "-";
+  if (hours < 1) return "不足1小时";
+  const wholeHours = Math.floor(hours);
+  const days = Math.floor(wholeHours / 24);
+  const rest = wholeHours % 24;
+  if (days > 0) return `${days}天${rest ? `${rest}小时` : ""}`;
+  return `${wholeHours}小时`;
 }
 
 function escapeHTML(value) {

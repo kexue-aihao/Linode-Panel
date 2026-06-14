@@ -28,6 +28,7 @@ function asset_url(string $path): string
         </div>
         <nav>
           <button class="nav-item active" data-view="vms"><span class="icon">□</span>VM 管理</button>
+          <button class="nav-item" data-view="officialApi"><span class="icon">⌁</span>官方 API</button>
           <button class="nav-item" data-view="accounts"><span class="icon">＋</span>Linode 号池</button>
           <button class="nav-item" data-view="proxies"><span class="icon">◇</span>代理配置</button>
           <button class="nav-item" data-view="dns"><span class="icon">◎</span>DNS 管理</button>
@@ -123,6 +124,55 @@ function asset_url(string $path): string
             <div class="panel">
               <div class="panel-head"><h2>Linode 号池</h2><button id="checkPoolBtn" class="secondary small">刷新号池</button></div>
               <div id="accountList" class="table-list"></div>
+            </div>
+          </div>
+        </section>
+
+        <section id="view-officialApi" class="view">
+          <div class="workspace wide-workspace">
+            <form id="officialApiForm" class="panel api-console">
+              <div class="panel-head">
+                <div>
+                  <h2>官方 API 控制台</h2>
+                  <p class="muted">使用默认 Linode 号池 Token 调用 Akamai/Linode 官方 API v4，覆盖官方 API 支持的全部模块。</p>
+                </div>
+                <a class="secondary small link-button" href="https://techdocs.akamai.com/linode-api/reference/api" target="_blank" rel="noreferrer">官方文档</a>
+              </div>
+              <div class="form-grid api-request-grid">
+                <label>请求方法
+                  <select name="method">
+                    <option>GET</option>
+                    <option>POST</option>
+                    <option>PUT</option>
+                    <option>PATCH</option>
+                    <option>DELETE</option>
+                  </select>
+                </label>
+                <label class="api-path-field">API 路径
+                  <input name="path" value="/v4/profile" placeholder="/v4/linode/instances" required />
+                </label>
+                <label class="api-list-all"><input type="checkbox" name="list_all" /> GET 自动翻页</label>
+              </div>
+              <label>JSON 请求体（GET 可留空）
+                <textarea name="payload" rows="8" spellcheck="false" placeholder='{"label":"demo","region":"us-east"}'></textarea>
+              </label>
+              <div class="api-actions">
+                <button class="primary" type="submit">执行官方 API</button>
+                <button class="secondary" type="button" id="clearOfficialApiBodyBtn">清空请求体</button>
+              </div>
+            </form>
+            <div class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2>常用接口模板</h2>
+                  <p class="muted">点击模板会自动填入方法、路径和示例请求体，执行前请确认会产生费用或修改资源的操作。</p>
+                </div>
+              </div>
+              <div id="officialApiTemplates" class="api-template-grid"></div>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><h2>返回结果</h2></div>
+              <pre id="officialApiResult" class="api-result">等待执行。</pre>
             </div>
           </div>
         </section>
