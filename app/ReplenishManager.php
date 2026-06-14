@@ -35,6 +35,7 @@ final class ReplenishManager
             'image' => trim((string)($data['image'] ?? '')),
             'root_pass' => (string)($data['root_pass'] ?? ''),
             'authorized_keys' => trim((string)($data['authorized_keys'] ?? '')),
+            'user_data' => trim((string)($data['user_data'] ?? '')),
             'tags' => trim((string)($data['tags'] ?? '')),
             'min_running_count' => max(0, (int)($data['min_running_count'] ?? 1)),
             'target_count' => max(1, (int)($data['target_count'] ?? 1)),
@@ -56,14 +57,14 @@ final class ReplenishManager
             $stmt = $this->pdo->prepare(
                 "UPDATE replenish_policies
                  SET name = ?, enabled = ?, name_prefix = ?, region = ?, linode_type = ?, image = ?,
-                     root_pass = ?, authorized_keys = ?, tags = ?, min_running_count = ?, target_count = ?,
+                     root_pass = ?, authorized_keys = ?, user_data = ?, tags = ?, min_running_count = ?, target_count = ?,
                      backups_enabled = ?, private_ip = ?, firewall_id = ?, dns_binding_id = ?, remark = ?,
                      updated_at = UTC_TIMESTAMP()
                  WHERE id = ?"
             );
             $stmt->execute([
                 $policy['name'], $policy['enabled'] ? 1 : 0, $policy['name_prefix'], $policy['region'], $policy['linode_type'], $policy['image'],
-                $policy['root_pass'], $policy['authorized_keys'], $policy['tags'], $policy['min_running_count'], $policy['target_count'],
+                $policy['root_pass'], $policy['authorized_keys'], $policy['user_data'], $policy['tags'], $policy['min_running_count'], $policy['target_count'],
                 $policy['backups_enabled'] ? 1 : 0, $policy['private_ip'] ? 1 : 0, $policy['firewall_id'] ?: null,
                 $policy['dns_binding_id'] ?: null, $policy['remark'], $id,
             ]);
@@ -73,14 +74,14 @@ final class ReplenishManager
 
         $stmt = $this->pdo->prepare(
             "INSERT INTO replenish_policies
-                (name, enabled, name_prefix, region, linode_type, image, root_pass, authorized_keys, tags,
+                (name, enabled, name_prefix, region, linode_type, image, root_pass, authorized_keys, user_data, tags,
                  min_running_count, target_count, backups_enabled, private_ip, firewall_id, dns_binding_id, remark,
                  created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())"
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())"
         );
         $stmt->execute([
             $policy['name'], $policy['enabled'] ? 1 : 0, $policy['name_prefix'], $policy['region'], $policy['linode_type'], $policy['image'],
-            $policy['root_pass'], $policy['authorized_keys'], $policy['tags'], $policy['min_running_count'], $policy['target_count'],
+            $policy['root_pass'], $policy['authorized_keys'], $policy['user_data'], $policy['tags'], $policy['min_running_count'], $policy['target_count'],
             $policy['backups_enabled'] ? 1 : 0, $policy['private_ip'] ? 1 : 0, $policy['firewall_id'] ?: null,
             $policy['dns_binding_id'] ?: null, $policy['remark'],
         ]);
@@ -160,6 +161,9 @@ final class ReplenishManager
         if ($keys !== []) {
             $payload['authorized_keys'] = $keys;
         }
+        if (trim((string)($policy['user_data'] ?? '')) !== '') {
+            $payload['metadata'] = ['user_data' => base64_encode((string)$policy['user_data'])];
+        }
         $tags = array_values(array_filter(array_map('trim', explode(',', (string)$policy['tags']))));
         if ($tags !== []) {
             $payload['tags'] = $tags;
@@ -198,6 +202,8 @@ final class ReplenishManager
             'image' => (string)$row['image'],
             'authorized_keys_set' => trim((string)$row['authorized_keys']) !== '',
             'root_pass_set' => (string)$row['root_pass'] !== '',
+            'user_data_set' => trim((string)($row['user_data'] ?? '')) !== '',
+            'user_data' => (string)($row['user_data'] ?? ''),
             'tags' => (string)$row['tags'],
             'min_running_count' => (int)$row['min_running_count'],
             'target_count' => (int)$row['target_count'],

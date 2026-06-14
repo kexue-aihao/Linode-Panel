@@ -12,6 +12,7 @@ const state = {
   notifications: null,
   logs: [],
   admin: null,
+  instanceLoadSeq: 0,
 };
 
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -40,7 +41,7 @@ const officialApiTemplates = [
   { group: "账号", name: "账单列表", method: "GET", path: "/v4/account/invoices", listAll: true, payload: "" },
   { group: "账号", name: "事件列表", method: "GET", path: "/v4/account/events", listAll: true, payload: "" },
   { group: "计算", name: "实例列表", method: "GET", path: "/v4/linode/instances", listAll: true, payload: "" },
-  { group: "计算", name: "创建实例示例", method: "POST", path: "/v4/linode/instances", listAll: false, payload: { label: "demo-linode", region: "us-east", type: "g6-nanode-1", image: "linode/ubuntu24.04", root_pass: "请改成强密码" } },
+  { group: "计算", name: "创建实例示例", method: "POST", path: "/v4/linode/instances", listAll: false, payload: { label: "demo-linode", region: "us-east", type: "g6-nanode-1", image: "linode/ubuntu24.04", root_pass: "请改成强密码", count: 1, user_data: "#cloud-config\npackage_update: true" } },
   { group: "计算", name: "实例套餐", method: "GET", path: "/v4/linode/types", listAll: true, payload: "" },
   { group: "计算", name: "公开镜像", method: "GET", path: "/v4/images?is_public=true", listAll: true, payload: "" },
   { group: "计算", name: "StackScripts", method: "GET", path: "/v4/linode/stackscripts?is_public=true", listAll: true, payload: "" },
@@ -209,18 +210,33 @@ async function refreshCurrent(force = false) {
 }
 
 async function loadInstances() {
+  const seq = ++state.instanceLoadSeq;
   try {
     $("#instanceGrid").innerHTML = `<div class="panel">加载实例中...</div>`;
     const data = await api("linode/instances");
-    const instances = data.data || [];
-    if (!instances.length) {
-      $("#instanceGrid").innerHTML = `<div class="panel">还没有实例。你可以点击右上角创建实例。</div>`;
-      return;
-    }
-    $("#instanceGrid").innerHTML = instances.map(instanceCard).join("");
-    $$(".instance-card [data-action]").forEach((button) => button.addEventListener("click", () => instanceAction(button.dataset.id, button.dataset.action, button.dataset.label)));
+    renderInstances(data.data || []);
+    loadInstanceEventTimes(seq);
   } catch (err) {
     $("#instanceGrid").innerHTML = `<div class="panel">${escapeHTML(err.message)}</div>`;
+  }
+}
+
+function renderInstances(instances) {
+  if (!instances.length) {
+    $("#instanceGrid").innerHTML = `<div class="panel">还没有实例。你可以点击右上角创建实例。</div>`;
+    return;
+  }
+  $("#instanceGrid").innerHTML = instances.map(instanceCard).join("");
+  $$(".instance-card [data-action]").forEach((button) => button.addEventListener("click", () => instanceAction(button.dataset.id, button.dataset.action, button.dataset.label)));
+}
+
+async function loadInstanceEventTimes(seq) {
+  try {
+    const data = await api("linode/instances?with_events=1");
+    if (seq !== state.instanceLoadSeq || state.view !== "vms") return;
+    renderInstances(data.data || []);
+  } catch (err) {
+    console.debug("instance event time refresh skipped", err);
   }
 }
 
@@ -305,12 +321,22 @@ function openCreatePanel() {
 
 async function loadCatalog(force = false) {
   if (state.catalog && !force) return populateCatalog();
+  const button = $("#loadCatalogBtn");
+  if (button) {
+    button.disabled = true;
+    button.textContent = "载入中...";
+  }
   try {
-    state.catalog = await api("linode/catalog");
+    state.catalog = await api(`linode/catalog${force ? "?force=1" : ""}`);
     populateCatalog();
     showNotice("创建选项已载入", "success");
   } catch (err) {
     showNotice(err.message, "error");
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = "载入创建选项";
+    }
   }
 }
 
@@ -324,35 +350,50 @@ function populateCatalog() {
 
 async function submitCreateInstance(event) {
   event.preventDefault();
-  if (!window.confirm("确认创建 Linode 实例？该操作会产生费用。")) return;
   const form = event.currentTarget;
-  const rootPass = form.root_pass.value;
-  const keys = form.authorized_keys.value.split(/\n+/).map((item) => item.trim()).filter(Boolean);
+  const count = Math.max(1, Math.min(50, Number.parseInt(form.elements.count.value || "1", 10) || 1));
+  const rootPass = form.elements.root_pass.value;
+  const keys = form.elements.authorized_keys.value.split(/\n+/).map((item) => item.trim()).filter(Boolean);
+  const userData = form.elements.user_data.value.trim();
   if (!rootPass && keys.length === 0) {
     showNotice("请填写 Root 密码或至少一个 SSH 公钥", "error");
     return;
   }
+  if (!window.confirm(`确认创建 ${count} 台 Linode 实例？该操作会产生费用。`)) return;
   const payload = {
-    label: form.label.value.trim(),
-    region: form.region.value,
-    type: form.type.value,
-    image: form.image.value,
-    backups_enabled: form.backups_enabled.checked,
-    private_ip: form.private_ip.checked,
+    label: form.elements.label.value.trim(),
+    region: form.elements.region.value,
+    type: form.elements.type.value,
+    image: form.elements.image.value,
+    count,
+    backups_enabled: form.elements.backups_enabled.checked,
+    private_ip: form.elements.private_ip.checked,
   };
   if (rootPass) payload.root_pass = rootPass;
   if (keys.length) payload.authorized_keys = keys;
-  if (form.firewall_id.value) payload.firewall_id = Number(form.firewall_id.value);
-  const tags = form.tags.value.split(",").map((item) => item.trim()).filter(Boolean);
+  if (userData) payload.user_data = userData;
+  if (form.elements.firewall_id.value) payload.firewall_id = Number(form.elements.firewall_id.value);
+  const tags = form.elements.tags.value.split(",").map((item) => item.trim()).filter(Boolean);
   if (tags.length) payload.tags = tags;
+  const submitButton = $("#createSubmitBtn");
+  submitButton.disabled = true;
+  submitButton.textContent = count > 1 ? `正在创建 ${count} 台...` : "正在创建...";
   try {
-    const instance = await api("linode/instances", { method: "POST", body: JSON.stringify(payload) });
-    showNotice(`实例 ${instance.label || payload.label} 已提交创建`, "success");
-    form.root_pass.value = "";
+    const result = await api("linode/instances", { method: "POST", body: JSON.stringify(payload) });
+    if (count > 1 || Array.isArray(result.created)) {
+      const failed = Number(result.failed_count || 0);
+      showNotice(`批量创建已提交：成功 ${result.created_count || 0} 台，失败 ${failed} 台`, failed ? "error" : "success");
+    } else {
+      showNotice(`实例 ${result.label || payload.label} 已提交创建`, "success");
+    }
+    form.elements.root_pass.value = "";
     $("#createForm").classList.add("hidden");
     await loadInstances();
   } catch (err) {
     showNotice(err.message, "error");
+  } finally {
+    submitButton.disabled = false;
+    submitButton.textContent = "创建实例";
   }
 }
 
@@ -1074,7 +1115,7 @@ function renderReplenishPolicies() {
       <div class="row account-row">
         <div><strong>${escapeHTML(policy.name)}</strong><span>${escapeHTML(policy.name_prefix)} / ${escapeHTML(policy.region)}</span></div>
         <div>${policy.enabled ? '<span class="badge">启用</span>' : '<span class="badge offline">停用</span>'}</div>
-        <div>${escapeHTML(policy.linode_type)}<span>${escapeHTML(policy.image)}</span></div>
+        <div>${escapeHTML(policy.linode_type)}<span>${escapeHTML(policy.image)}${policy.user_data_set ? " / UserData" : ""}</span></div>
         <div>目标 ${policy.target_count}<span>最少运行 ${policy.min_running_count}</span></div>
         <div class="row-actions">
           <button class="secondary small" data-replenish-run="${policy.id}">执行一次</button>

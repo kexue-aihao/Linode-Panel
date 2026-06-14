@@ -93,17 +93,19 @@ function asset_url(string $path): string
                 <label>区域<select name="region" required></select></label>
                 <label>套餐<select name="type" required></select></label>
                 <label>镜像<select name="image" required></select></label>
+                <label>创建数量<input name="count" type="number" min="1" max="50" value="1" required /></label>
                 <label>Root 密码<input name="root_pass" type="password" autocomplete="new-password" placeholder="强密码" /></label>
                 <label>SSH 公钥<textarea name="authorized_keys" rows="3" placeholder="ssh-ed25519 AAAA..."></textarea></label>
                 <label>防火墙<select name="firewall_id"><option value="">不绑定</option></select></label>
                 <label>标签<input name="tags" placeholder="panel,production" /></label>
+                <label class="span-two">UserData / cloud-init<textarea name="user_data" rows="8" spellcheck="false" placeholder="#cloud-config&#10;package_update: true&#10;packages:&#10;  - nginx"></textarea></label>
               </div>
               <div class="toggle-row">
                 <label><input type="checkbox" name="backups_enabled" /> 启用备份</label>
                 <label><input type="checkbox" name="private_ip" /> 分配私网 IP</label>
               </div>
               <div class="danger-note">创建实例会产生费用。请确认区域、套餐、镜像和安全设置。</div>
-              <button class="primary" type="submit">创建实例</button>
+              <button class="primary" type="submit" id="createSubmitBtn">创建实例</button>
             </form>
           </div>
         </section>
@@ -323,6 +325,7 @@ function asset_url(string $path): string
                 <label>标签<input name="tags" placeholder="panel,auto" /></label>
                 <label>Root 密码<input name="root_pass" type="password" autocomplete="new-password" /></label>
                 <label>SSH 公钥<textarea name="authorized_keys" rows="3"></textarea></label>
+                <label class="span-two">UserData / cloud-init<textarea name="user_data" rows="8" spellcheck="false" placeholder="#cloud-config&#10;package_update: true&#10;packages:&#10;  - nginx"></textarea></label>
                 <label class="span-two">备注<input name="remark" /></label>
               </div>
               <div class="toggle-row">

@@ -83,7 +83,7 @@ final class LinodeClient
 
         while ($page <= $pages) {
             $separator = str_contains($path, '?') ? '&' : '?';
-            $response = $this->request('GET', $path . $separator . 'page=' . $page . '&page_size=100');
+            $response = $this->request('GET', $path . $separator . 'page=' . $page . '&page_size=500');
             $data = array_merge($data, $response['data'] ?? []);
             $pages = (int)($response['pages'] ?? 1);
             $results = (int)($response['results'] ?? count($data));

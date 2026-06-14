@@ -17,7 +17,7 @@ use LinodePanel\SettingsStore;
 
 require __DIR__ . '/app/bootstrap.php';
 
-function lp_attach_power_on_times(array $response, LinodeClient $client): array
+function lp_attach_power_on_times(array $response, LinodeClient $client, bool $withEvents = false): array
 {
     $instances = $response['data'] ?? [];
     if (!is_array($instances) || $instances === []) {
@@ -33,25 +33,27 @@ function lp_attach_power_on_times(array $response, LinodeClient $client): array
     }
 
     $eventTimes = [];
-    try {
-        $events = $client->request('GET', '/v4/account/events?page=1&page_size=200')['data'] ?? [];
-        $bootActions = ['linode_boot', 'linode_reboot', 'linode_create'];
-        foreach ($events as $event) {
-            $action = (string)($event['action'] ?? '');
-            $status = (string)($event['status'] ?? '');
-            $entityId = (int)($event['entity']['id'] ?? 0);
-            $created = (string)($event['created'] ?? '');
-            if (!isset($instanceIds[$entityId]) || !in_array($action, $bootActions, true) || $created === '' || $status === 'failed') {
-                continue;
+    if ($withEvents) {
+        try {
+            $events = $client->request('GET', '/v4/account/events?page=1&page_size=200')['data'] ?? [];
+            $bootActions = ['linode_boot', 'linode_reboot', 'linode_create'];
+            foreach ($events as $event) {
+                $action = (string)($event['action'] ?? '');
+                $status = (string)($event['status'] ?? '');
+                $entityId = (int)($event['entity']['id'] ?? 0);
+                $created = (string)($event['created'] ?? '');
+                if (!isset($instanceIds[$entityId]) || !in_array($action, $bootActions, true) || $created === '' || $status === 'failed') {
+                    continue;
+                }
+                $createdTs = strtotime($created) ?: 0;
+                $currentTs = strtotime((string)($eventTimes[$entityId]['time'] ?? '')) ?: 0;
+                if ($createdTs > $currentTs) {
+                    $eventTimes[$entityId] = ['time' => $created, 'source' => $action];
+                }
             }
-            $createdTs = strtotime($created) ?: 0;
-            $currentTs = strtotime((string)($eventTimes[$entityId]['time'] ?? '')) ?: 0;
-            if ($createdTs > $currentTs) {
-                $eventTimes[$entityId] = ['time' => $created, 'source' => $action];
-            }
+        } catch (Throwable) {
+            $eventTimes = [];
         }
-    } catch (Throwable) {
-        $eventTimes = [];
     }
 
     $now = time();
@@ -85,6 +87,54 @@ function lp_attach_power_on_times(array $response, LinodeClient $client): array
 
     $response['data'] = $instances;
     return $response;
+}
+
+function lp_normalize_linode_create_payload(array $body): array
+{
+    $userData = trim((string)($body['user_data'] ?? ''));
+    unset($body['count'], $body['quantity'], $body['user_data']);
+
+    if ($userData !== '') {
+        if (!isset($body['metadata']) || !is_array($body['metadata'])) {
+            $body['metadata'] = [];
+        }
+        $body['metadata']['user_data'] = base64_encode($userData);
+    }
+
+    return $body;
+}
+
+function lp_linode_batch_label(string $label, int $index, int $total): string
+{
+    if ($total <= 1) {
+        return $label;
+    }
+    $base = $label !== '' ? $label : 'linode';
+    return sprintf('%s-%02d', $base, $index);
+}
+
+function lp_cache_path(string $key): string
+{
+    return __DIR__ . '/data/cache/' . preg_replace('/[^a-zA-Z0-9_.-]/', '_', $key) . '.json';
+}
+
+function lp_cache_get(string $key, int $ttl): ?array
+{
+    $path = lp_cache_path($key);
+    if (!is_file($path) || time() - filemtime($path) > $ttl) {
+        return null;
+    }
+    $data = json_decode((string)file_get_contents($path), true);
+    return is_array($data) ? $data : null;
+}
+
+function lp_cache_set(string $key, array $value): void
+{
+    $dir = dirname(lp_cache_path($key));
+    if (!is_dir($dir)) {
+        @mkdir($dir, 0755, true);
+    }
+    @file_put_contents(lp_cache_path($key), json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
 }
 
 function lp_format_uptime_hours(?int $hours): string
@@ -413,11 +463,27 @@ try {
     }
 
     if ($action === 'linode/catalog' && $method === 'GET') {
+        $force = !empty($_GET['force']);
+        $ttl = 600;
+        $regions = !$force ? lp_cache_get('linode_regions', $ttl) : null;
+        $types = !$force ? lp_cache_get('linode_types', $ttl) : null;
+        $images = !$force ? lp_cache_get('linode_public_images', $ttl) : null;
+        if ($regions === null) {
+            $regions = $client->listAll('/v4/regions');
+            lp_cache_set('linode_regions', $regions);
+        }
+        if ($types === null) {
+            $types = $client->listAll('/v4/linode/types');
+            lp_cache_set('linode_types', $types);
+        }
+        if ($images === null) {
+            $images = $client->listAll('/v4/images?is_public=true');
+            lp_cache_set('linode_public_images', $images);
+        }
         lp_json(200, [
-            'regions' => $client->listAll('/v4/regions'),
-            'types' => $client->listAll('/v4/linode/types'),
-            'images' => $client->listAll('/v4/images?is_public=true'),
-            'stackscripts' => $client->listAll('/v4/linode/stackscripts?is_public=true'),
+            'regions' => $regions,
+            'types' => $types,
+            'images' => $images,
             'firewalls' => $client->listAll('/v4/networking/firewalls'),
         ]);
     }
@@ -458,10 +524,49 @@ try {
 
     if ($action === 'linode/instances') {
         if ($method === 'GET') {
-            lp_json(200, lp_attach_power_on_times($client->listAll('/v4/linode/instances'), $client));
+            lp_json(200, lp_attach_power_on_times($client->listAll('/v4/linode/instances'), $client, !empty($_GET['with_events'])));
         }
         if ($method === 'POST') {
-            lp_json(202, $client->request('POST', '/v4/linode/instances', lp_read_json()));
+            $body = lp_read_json();
+            $count = max(1, min(50, (int)($body['count'] ?? $body['quantity'] ?? 1)));
+            $payload = lp_normalize_linode_create_payload($body);
+
+            if ($count === 1) {
+                $instance = $client->request('POST', '/v4/linode/instances', $payload);
+                $logger->log('linode', 'create', 'success', '实例已提交创建：' . ($instance['label'] ?? $payload['label'] ?? ''), ['instance_id' => $instance['id'] ?? 0]);
+                lp_json(202, $instance);
+            }
+
+            $baseLabel = trim((string)($payload['label'] ?? 'linode'));
+            $created = [];
+            $failed = [];
+            for ($i = 1; $i <= $count; $i++) {
+                $itemPayload = $payload;
+                $itemPayload['label'] = lp_linode_batch_label($baseLabel, $i, $count);
+                try {
+                    $created[] = $client->request('POST', '/v4/linode/instances', $itemPayload);
+                } catch (Throwable $e) {
+                    $failed[] = [
+                        'label' => $itemPayload['label'],
+                        'message' => $e->getMessage(),
+                    ];
+                }
+            }
+            $logger->log(
+                'linode',
+                'batch_create',
+                $failed === [] ? 'success' : 'failed',
+                sprintf('批量创建实例完成：成功 %d 台，失败 %d 台', count($created), count($failed)),
+                ['requested' => $count, 'created' => count($created), 'failed' => count($failed)]
+            );
+            lp_json($failed === [] ? 202 : 207, [
+                'ok' => $failed === [],
+                'requested' => $count,
+                'created_count' => count($created),
+                'failed_count' => count($failed),
+                'created' => $created,
+                'failed' => $failed,
+            ]);
         }
     }
 

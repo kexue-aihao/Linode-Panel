@@ -317,7 +317,11 @@ https://www.miyaip.com/api/ProxyLogic/Generate?Num=10&SessionTime=30&Server=us&F
 
 ### 通知、日志、安全和后台
 
+- 「VM 管理」的创建实例支持批量创建，创建数量最多 50 台。批量创建会自动把实例名称追加为 `名称-01`、`名称-02`。
+- 手动创建实例支持 `UserData / cloud-init` 注入。页面填写原始 cloud-init 内容即可，后端会自动 Base64 编码后写入 `metadata.user_data`。
+- VM 列表默认采用快速加载模式，不再阻塞等待账号事件扫描；创建选项会缓存区域、套餐和公开镜像 10 分钟，点击「载入创建选项」可强制刷新。
 - 「自动补机」可保存策略并手动执行一次。若需要定时执行，可在 aaPanel 计划任务中定时请求对应策略的 `replenish/policies/{id}/run` API。
+- 自动补机支持 `UserData / cloud-init` 注入，同样会自动编码后写入 `metadata.user_data`，适合初始化脚本、安装依赖、写入配置等场景。
 - 「通知设置」支持 Telegram Bot Token、个人 Chat ID 和群组 Chat ID。
 - 「执行日志」记录关键操作并支持导出。
 - 「账号安全」用于修改管理员账号和密码。

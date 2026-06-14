@@ -188,6 +188,7 @@ final class Database
                 image VARCHAR(128) NOT NULL,
                 root_pass TEXT NULL,
                 authorized_keys TEXT NULL,
+                user_data MEDIUMTEXT NULL,
                 tags VARCHAR(255) NOT NULL DEFAULT '',
                 min_running_count INT UNSIGNED NOT NULL DEFAULT 1,
                 target_count INT UNSIGNED NOT NULL DEFAULT 1,
@@ -204,6 +205,21 @@ final class Database
                 INDEX idx_last_run_at (last_run_at)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
         );
+
+        self::ensureColumn($pdo, 'replenish_policies', 'user_data', "MEDIUMTEXT NULL AFTER authorized_keys");
+    }
+
+    private static function ensureColumn(PDO $pdo, string $table, string $column, string $definition): void
+    {
+        $stmt = $pdo->prepare(
+            "SELECT COUNT(*)
+             FROM INFORMATION_SCHEMA.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?"
+        );
+        $stmt->execute([$table, $column]);
+        if ((int)$stmt->fetchColumn() === 0) {
+            $pdo->exec("ALTER TABLE `$table` ADD COLUMN `$column` $definition");
+        }
     }
 
     public static function randomSecret(int $bytes = 48): string
